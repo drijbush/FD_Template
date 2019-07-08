@@ -38,7 +38,8 @@ Contains
     Real( wp ) :: V
     
     g%dir_vecs = vecs
-
+    Allocate( g%inv_vecs, Mold = g%dir_vecs )
+    
     Call givens_invert( g%dir_vecs, g%inv_vecs, V )
     g%volume = Abs( V )
     
@@ -354,17 +355,16 @@ Module FD_Laplacian_3d_module
 
 Contains
 
-  Subroutine init( FD, max_deriv, order, vecs )
+  Subroutine init( FD, order, vecs )
 
     Class( FD_Laplacian_3d )     , Intent(   Out ) :: FD
-    Integer                      , Intent( In    ) :: max_deriv
     Integer                      , Intent( In    ) :: order
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
 
     Integer :: this
     Integer :: i, j
     
-    Call FD%FD_init( max_deriv, order, vecs )
+    Call FD%FD_init( 2, order, vecs )
 
     FD%nc_block = 1
     Do While( usage( FD%nc_block, 2 * FD%get_order() ) < n_cache )
@@ -391,22 +391,165 @@ Contains
     
   End Subroutine init
 
-  Subroutine apply( FD, l1, l2, l3, s1, s2, s3, f1, f2, f3, grid, Laplacian )
+  Subroutine apply( FD, l1g, l2g, l3g, l1l, l2l, l3l, s1, s2, s3, f1, f2, f3, grid, Laplacian )
 
-    Class( FD_Laplacian_3d )              , Intent(   Out ) :: FD
-    Integer                               , Intent( In    ) :: l1 ! lower bounds
-    Integer                               , Intent( In    ) :: l2
-    Integer                               , Intent( In    ) :: l3
-    Integer                               , Intent( In    ) :: s1 ! start point for calculation
-    Integer                               , Intent( In    ) :: s2
-    Integer                               , Intent( In    ) :: s3
-    Integer                               , Intent( In    ) :: f1 ! final point for calculation
-    Integer                               , Intent( In    ) :: f2
-    Integer                               , Intent( In    ) :: f3
-    Real( wp ), Dimension( l1:, l2:, l3: ), Intent( In    ) :: grid ! Thing to be differentiated
-    Real( wp ), Dimension( l1:, l2:, l3: ), Intent(   Out ) :: laplacian
+    Class( FD_Laplacian_3d )                 , Intent(   Out ) :: FD
+    Integer                                  , Intent( In    ) :: l1g ! lower bounds grid
+    Integer                                  , Intent( In    ) :: l2g
+    Integer                                  , Intent( In    ) :: l3g
+    Integer                                  , Intent( In    ) :: l1l ! lower bounds laplacian
+    Integer                                  , Intent( In    ) :: l2l
+    Integer                                  , Intent( In    ) :: l3l
+    Integer                                  , Intent( In    ) :: s1 ! start point for calculation
+    Integer                                  , Intent( In    ) :: s2
+    Integer                                  , Intent( In    ) :: s3
+    Integer                                  , Intent( In    ) :: f1 ! final point for calculation
+    Integer                                  , Intent( In    ) :: f2
+    Integer                                  , Intent( In    ) :: f3
+    Real( wp ), Dimension( l1g:, l2g:, l3g: ), Intent( In    ) :: grid ! Thing to be differentiated
+    Real( wp ), Dimension( l1l:, l2l:, l3l: ), Intent(   Out ) :: laplacian
+
+    Real( wp ), Dimension( : ), Allocatable :: w1, w2
+    
+    Integer :: order
+    
+    Integer :: i_block_3, i_block_2, i_block_1
+
+    order = FD%get_order()
+
+    w1 = FD%get_weight( 1 )
+    w2 = FD%get_weight( 2 )
+
+    !$omp do collapse( 3 )
+    Do i_block_3 = s3, f3, FD%nc_block( 3 )
+       Do i_block_2 = s2, f2, FD%nc_block( 2 )
+          Do i_block_1 = s1, f1, FD%nc_block( 1 )
+             Call apply_block( [ i_block_1, i_block_2, i_block_3 ], &
+                  [ l1g, l2g, l3g ], [l1l, l2l, l3l ], FD%nc_block, [ f1, f2, f3 ], &
+                  order, w1, w2, FD%deriv_weights, grid, laplacian )
+          End Do
+       End Do
+    End Do
+    !$omp end do
 
   End Subroutine apply
+
+  Pure Subroutine apply_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, grid, laplacian )
+
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: s
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: lg
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: ll
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: nb
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: f
+    Integer                         , Intent( In    ) :: order
+    Real( wp ), Dimension( -order: ), Intent( In    ) :: w1
+    Real( wp ), Dimension( -order: ), Intent( In    ) :: w2
+    Real( wp ), Dimension( 1:6     ), Intent( In    ) :: deriv_weights
+    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian
+
+    Real( wp ) :: st1, st2, st3
+    Real( wp ) :: fac1, fac2, fac3
+    Real( wp ) :: st12, st13, st23
+    Real( wp ) :: fac12, fac13, fac23
+
+    Integer :: i3, i2, i1
+    Integer :: it, it1, it2, it3
+
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+
+             ! x^2, y^2, z^2 at grid point 
+             laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( 1 ) * grid( i1, i2, i3 )
+             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 4 ) * grid( i1, i2, i3 )
+             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 6 ) * grid( i1, i2, i3 )
+
+             ! x^2
+             Do it = 1, order
+
+                fac1 = w2( it ) * deriv_weights( 1 )
+                st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac1 * st1
+
+             End Do
+
+          End Do
+       End Do
+    End Do
+
+    ! y^2, z^2
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do it = 1, order
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+
+                fac2 = w2( it ) * deriv_weights( 4 )
+                st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac2 * st2
+
+                fac3 = w2( it ) * deriv_weights( 6 )
+                st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac3 * st3
+
+             End Do
+          End Do
+       End Do
+    End Do
+
+    ! xy
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do it2 = 1, order
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it1 = 1, order
+                   fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( 2 )
+                   st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
+                        ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
+                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
+                End Do
+             End Do
+          End Do
+       End Do
+    End Do
+
+    ! xz
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+       Do it3 = 1, order
+          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it1 = 1, order
+                   fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( 3 )
+                   st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
+                        ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
+
+                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
+                End Do
+             End Do
+          End Do
+       End Do
+    End Do
+
+    ! yz
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+       Do it3 = 1, order
+          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+             ! first derivs have zero weight at the grid point for central differences
+             Do it2 = 1, order
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                   fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( 5 )
+                   st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
+                        ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
+                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
+                End Do
+             End Do
+          End Do
+       End Do
+    End Do
+
+  End Subroutine apply_block
   
   Pure Function usage( nc_block, accuracy ) Result( reals )
     
@@ -426,3 +569,29 @@ Contains
   End Function usage
   
 End Module FD_Laplacian_3d_module
+
+Program testit
+
+  Use numbers_module        , Only : wp
+  Use FD_Laplacian_3d_module, Only : FD_Laplacian_3D
+
+  Implicit None
+  
+  Type( FD_Laplacian_3d ) :: FD
+  
+  Real( wp ), Dimension( :, :, : ), Allocatable :: grid
+  Real( wp ), Dimension( :, :, : ), Allocatable :: laplacian
+
+  Real( wp ), Dimension( 1:3, 1:3 ) :: grid_vecs
+  
+  Integer :: order
+
+  Write( *, * ) 'Grid vecs?'
+  Read ( *, * ) grid_vecs
+
+  Write( *, * ) 'order ?'
+  Read ( *, * ) order
+
+  Call FD%init( order, grid_vecs )
+  
+End Program testit
