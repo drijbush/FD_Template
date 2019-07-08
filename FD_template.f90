@@ -202,6 +202,9 @@ Module FD_template_module
    Contains
      Procedure, Public :: init
      Procedure, Public :: set_order
+     Procedure, Public :: get_order
+     Procedure, Public :: get_max_deriv
+     Procedure, Public :: get_weight
   End type FD_template
 
 Contains
@@ -233,6 +236,38 @@ Contains
          2 * FD%order, FD%max_deriv, FD%weights )
 
   End Subroutine set_order
+
+  Pure Function get_order( FD ) Result( order )
+
+    Integer :: order
+
+    Class( FD_template ), Intent( In ) :: FD
+    
+    order = FD%order
+
+  End Function get_order
+
+  Pure Function get_max_deriv( FD ) Result( max_deriv )
+
+    Integer :: max_deriv
+
+    Class( FD_template ), Intent( In ) :: FD
+    
+    max_deriv = FD%max_deriv
+
+  End Function get_max_deriv
+
+  Pure Function get_weight( FD, deriv  ) Result( weight )
+
+    Real( wp ), Allocatable, Dimension( : ) :: weight
+
+    Class( FD_template ), Intent( In ) :: FD
+    Integer             , Intent( In ) :: deriv
+
+    Allocate( weight( -FD%order:FD%order ) )
+    weight = FD%weights( :, deriv )
+
+  End Function get_weight
 
   Subroutine weights (z,x,n,m,c)
     !---
