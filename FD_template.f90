@@ -42,7 +42,7 @@ Contains
     
     Call givens_invert( g%dir_vecs, g%inv_vecs, V )
     g%volume = Abs( V )
-    
+
   End Subroutine set_dir_vecs
 
   Pure Function get_dir_vec( g, which ) Result( v )
@@ -348,6 +348,7 @@ Module FD_Laplacian_3d_module
      Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
    Contains
      Procedure, Public :: init
+     Procedure, Public :: reset_vecs
      Procedure, Public :: apply
   End type FD_Laplacian_3d
 
@@ -361,10 +362,7 @@ Contains
     Integer                      , Intent( In    ) :: order
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
 
-    Integer :: this
-    Integer :: i, j
-    
-    Call FD%FD_init( 2, order, vecs )
+    Call FD%FD_init( 2, order / 2, vecs )
 
     FD%nc_block = 1
     Do While( usage( FD%nc_block, 2 * FD%get_order() ) < n_cache )
@@ -380,6 +378,20 @@ Contains
        End If
     End If
 
+    Call FD%reset_vecs( vecs )
+    
+  End Subroutine init
+
+  Subroutine reset_vecs( FD, vecs )
+
+    Class( FD_Laplacian_3d )     , Intent( InOut ) :: FD
+    Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
+
+    Integer :: this
+    Integer :: i, j
+    
+!!$    Call FD%FD_init( 2, FD%get_order(), vecs )
+    
     this = 0
     Do i = 1, 3
        Do j = i, 3
@@ -389,11 +401,11 @@ Contains
        End Do
     End Do
     
-  End Subroutine init
+  End Subroutine reset_vecs
 
   Subroutine apply( FD, l1g, l2g, l3g, l1l, l2l, l3l, s1, s2, s3, f1, f2, f3, grid, Laplacian )
 
-    Class( FD_Laplacian_3d )                 , Intent(   Out ) :: FD
+    Class( FD_Laplacian_3d )                 , Intent( In    ) :: FD
     Integer                                  , Intent( In    ) :: l1g ! lower bounds grid
     Integer                                  , Intent( In    ) :: l2g
     Integer                                  , Intent( In    ) :: l3g
@@ -436,18 +448,28 @@ Contains
 
   Pure Subroutine apply_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, grid, laplacian )
 
-    Integer, Dimension( 1:3 )       , Intent( In    ) :: s
-    Integer, Dimension( 1:3 )       , Intent( In    ) :: lg
-    Integer, Dimension( 1:3 )       , Intent( In    ) :: ll
-    Integer, Dimension( 1:3 )       , Intent( In    ) :: nb
-    Integer, Dimension( 1:3 )       , Intent( In    ) :: f
-    Integer                         , Intent( In    ) :: order
-    Real( wp ), Dimension( -order: ), Intent( In    ) :: w1
-    Real( wp ), Dimension( -order: ), Intent( In    ) :: w2
-    Real( wp ), Dimension( 1:6     ), Intent( In    ) :: deriv_weights
-    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid
-    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian
+    ! Apply the FD laplacian operator to part of the grid. An effort has been made
+    ! ro make sure the required data is in cache
+    
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: s   ! Where to start
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: lg  ! Lower bound of grid array
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: ll  ! Lower bound of laplacian array
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: nb  ! Cache blocking factors
+    Integer, Dimension( 1:3 )       , Intent( In    ) :: f   ! Where to finish
+    Integer                         , Intent( In    ) :: order ! Order of the FD approximation
+    Real( wp ), Dimension( -order: ), Intent( In    ) :: w1    ! FD Weights for first derivs
+    Real( wp ), Dimension( -order: ), Intent( In    ) :: w2    ! FD Weights for second derivs
+    Real( wp ), Dimension( 1:6     ), Intent( In    ) :: deriv_weights ! See below
+    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid ! The source
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian ! The result
 
+    ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
+    ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
+    ! as we must finite difference along the directions of the grid. deriv_weights are the d_xx, d_xy
+    ! etc. coefficients in this expression
+
+    Real( wp ), Parameter :: orthog_tol = 1.0e-14_wp
+    
     Real( wp ) :: st1, st2, st3
     Real( wp ) :: fac1, fac2, fac3
     Real( wp ) :: st12, st13, st23
@@ -456,16 +478,19 @@ Contains
     Integer :: i3, i2, i1
     Integer :: it, it1, it2, it3
 
+    ! Order the loops for the various terms so that the inner loop is stride 1 
+
+    ! First do the xx, yy, zz terms. Assume the weights of these are always non-zero
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-             ! x^2, y^2, z^2 at grid point 
+             ! FD x^2, y^2, z^2 at grid point 
              laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( 1 ) * grid( i1, i2, i3 )
              laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 4 ) * grid( i1, i2, i3 )
              laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 6 ) * grid( i1, i2, i3 )
 
-             ! x^2
+             ! FD x^2
              Do it = 1, order
 
                 fac1 = w2( it ) * deriv_weights( 1 )
@@ -478,7 +503,7 @@ Contains
        End Do
     End Do
 
-    ! y^2, z^2
+    ! FD y^2, z^2
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do it = 1, order
@@ -498,57 +523,62 @@ Contains
     End Do
 
     ! xy
-    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-          Do it2 = 1, order
-             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                ! first derivs have zero weight at the grid point for central differences
-                Do it1 = 1, order
-                   fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( 2 )
-                   st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
-                        ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
-                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
-                End Do
-             End Do
-          End Do
-       End Do
-    End Do
-
-    ! xz
-    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-       Do it3 = 1, order
+    If( Abs( deriv_weights( 2 ) ) > orthog_tol ) Then
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                ! first derivs have zero weight at the grid point for central differences
-                Do it1 = 1, order
-                   fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( 3 )
-                   st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
-                        ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
-
-                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
-                End Do
-             End Do
-          End Do
-       End Do
-    End Do
-
-    ! yz
-    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-       Do it3 = 1, order
-          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-             ! first derivs have zero weight at the grid point for central differences
              Do it2 = 1, order
                 Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                   fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( 5 )
-                   st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
-                        ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
-                   laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
+                   ! first derivs have zero weight at the grid point for central differences
+                   Do it1 = 1, order
+                      fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( 2 )
+                      st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
+                           ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
+                   End Do
                 End Do
              End Do
           End Do
        End Do
-    End Do
+    End If
 
+    ! xz
+    If( Abs( deriv_weights( 3 ) ) > orthog_tol ) Then
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                   ! first derivs have zero weight at the grid point for central differences
+                   Do it1 = 1, order
+                      fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( 3 )
+                      st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
+                           ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
+                   End Do
+                End Do
+             End Do
+          End Do
+       End Do
+    End If
+
+    ! yz
+    If( Abs( deriv_weights( 5 ) ) > orthog_tol ) Then
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it2 = 1, order
+                   Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                      fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( 5 )
+                      st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
+                           ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
+                   End Do
+                End Do
+             End Do
+          End Do
+       End Do
+    End If
+       
   End Subroutine apply_block
   
   Pure Function usage( nc_block, accuracy ) Result( reals )
@@ -581,17 +611,71 @@ Program testit
   
   Real( wp ), Dimension( :, :, : ), Allocatable :: grid
   Real( wp ), Dimension( :, :, : ), Allocatable :: laplacian
+  Real( wp ), Dimension( :, :, : ), Allocatable :: fd_laplacian
 
   Real( wp ), Dimension( 1:3, 1:3 ) :: grid_vecs
+
+  Real( wp ), Dimension( 1:3 ) :: r, ri
+  
+  Real( wp ) :: alpha, alpha_sq
+  Real( wp ) :: x, y, z
+  Real( wp ) :: norm
+  Real( wp ) :: arg
+  Real( wp ) :: gauss, gauss_x2, gauss_y2, gauss_z2
+
+  Integer, Dimension( 1:3 ) :: ng, nt
   
   Integer :: order
+  Integer :: i3, i2, i1
 
   Write( *, * ) 'Grid vecs?'
   Read ( *, * ) grid_vecs
 
+  Write( *, * ) 'ri ?'
+  Read ( *, * ) ri
+
+  Write( *, * ) 'alpha ?'
+  Read ( *, * ) alpha
+  alpha_sq = alpha * alpha
+  
   Write( *, * ) 'order ?'
   Read ( *, * ) order
 
+  Write( *, * ) 'ng ?'
+  Read ( *, * ) ng
+  
+  nt = ng + order / 2
+
+  Allocate(         grid( -nt( 1 ):nt( 1 ), -nt( 2 ):nt( 2 ), -nt( 3 ):nt( 3 ) ) )
+  Allocate(    laplacian( -nt( 1 ):nt( 1 ), -nt( 2 ):nt( 2 ), -nt( 3 ):nt( 3 ) ) )
+  Allocate( fd_laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) )
+
+  norm = ( alpha / Sqrt( 3.1415926535897932384626433832795_wp ) ) ** 3
+  Do i3 = -nt( 3 ), nt( 3 )
+     Do i2 = -nt( 2 ), nt( 2 )
+        Do i1 = -nt( 1 ), nt( 1 )
+           r = i1 * grid_vecs( :, 1 ) + i2 * grid_vecs( :, 2 ) + i3 * grid_vecs( :, 3 ) - ri
+           arg = alpha_sq * Dot_Product( r, r )
+           gauss = norm * Exp( - arg )
+           grid( i1, i2, i3 ) = gauss
+           x = r( 1 )
+           y = r( 2 )
+           z = r( 3 )
+           gauss_x2 = gauss * ( - 2.0_wp * alpha_sq + 4.0 * alpha_sq * alpha_sq * x * x )
+           gauss_y2 = gauss * ( - 2.0_wp * alpha_sq + 4.0 * alpha_sq * alpha_sq * y * y )
+           gauss_z2 = gauss * ( - 2.0_wp * alpha_sq + 4.0 * alpha_sq * alpha_sq * z * z )
+           laplacian( i1, i2, i3 ) = gauss_x2 + gauss_y2 + gauss_z2
+        End Do
+     End Do
+  End Do
+
   Call FD%init( order, grid_vecs )
+  Call FD%apply( -nt( 1 ), -nt( 2 ), -nt( 3 ), -ng( 1 ), -ng( 2 ), -ng( 3 ), &
+       -ng( 1 ), -ng( 2 ), -ng( 3 ), ng( 1 ), ng( 2 ), ng( 3 ), &
+       grid, fd_laplacian )
+
+  Write( *, * ) Maxval( Abs( fd_laplacian - &
+       laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) ) )
+  Write( *, * ) Maxval( Abs( laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) ) )
   
 End Program testit
