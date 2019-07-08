@@ -200,7 +200,7 @@ Module FD_template_module
      Integer                                   , Private :: order
      Real( wp ), Dimension( :, : ), Allocatable, Private :: weights
    Contains
-     Procedure, Public :: init
+     Procedure, Public :: FD_init
      Procedure, Public :: set_order
      Procedure, Public :: get_order
      Procedure, Public :: get_max_deriv
@@ -209,7 +209,7 @@ Module FD_template_module
 
 Contains
 
-  Subroutine init( FD, max_deriv, order, vecs )
+  Subroutine FD_init( FD, max_deriv, order, vecs )
 
     Class( FD_template )         , Intent(   Out ) :: FD
     Integer                      , Intent( In    ) :: max_deriv
@@ -219,7 +219,7 @@ Contains
     Call FD%set_order( max_deriv, order )
     Call FD%set_dir_vecs( vecs )
 
-  End Subroutine init
+  End Subroutine FD_init
   
   Subroutine set_order( FD, max_deriv, order )
 
@@ -333,12 +333,79 @@ Module FD_Laplacian_3d_module
   
   Implicit None
 
+  Integer, Parameter :: n_cache = ( 2 ** 18 ) / ( 8 ) ! Number of reals in cache
+
+  Integer, Parameter, Public :: XX = 1
+  Integer, Parameter, Public :: XY = 2
+  Integer, Parameter, Public :: XZ = 3
+  Integer, Parameter, Public :: YY = 4
+  Integer, Parameter, Public :: YZ = 5
+  Integer, Parameter, Public :: ZZ = 6
+
   Type, Extends( FD_template ), Public :: FD_Laplacian_3d
-     
+     Integer   , Dimension( 1:3 ), Private :: nc_block
+     Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
+   Contains
+     Procedure, Public :: init
+     Procedure, Public :: apply
   End type FD_Laplacian_3d
 
   Private
 
 Contains
 
+  Subroutine init( FD, max_deriv, order, vecs )
+
+    Class( FD_Laplacian_3d )     , Intent(   Out ) :: FD
+    Integer                      , Intent( In    ) :: max_deriv
+    Integer                      , Intent( In    ) :: order
+    Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
+
+    Integer :: this
+    Integer :: i, j
+    
+    Call FD%FD_init( max_deriv, order, vecs )
+
+    FD%nc_block = 1
+    Do While( usage( FD%nc_block, FD%get_order() ) < n_cache )
+       FD%nc_block = FD%nc_block + 1
+    End Do
+    FD%nc_block( 1 ) = FD%nc_block( 1 ) + 1
+    If( usage( FD%nc_block, FD%get_order() ) >= n_cache ) Then
+       FD%nc_block( 1 ) = FD%nc_block( 1 ) - 1
+    Else
+       FD%nc_block( 2 ) = FD%nc_block( 2 ) + 1
+       If( usage( FD%nc_block, FD%get_order() ) >= n_cache ) Then
+          FD%nc_block( 2 ) = FD%nc_block( 2 ) - 1
+       End If
+    End If
+
+    this = 0
+    Do i = 1, 3
+       Do j = i, 3
+          this = this + 1
+          FD%deriv_weights( this ) = Dot_Product( FD%get_inv_vec( i ), FD%get_inv_vec( j ) )
+          If( i /= j ) FD%deriv_weights( this ) = 2.0_wp * FD%deriv_weights( this )
+       End Do
+    End Do
+    
+  End Subroutine init
+  
+  Pure Function usage( nc_block, accuracy ) Result( reals )
+    
+    Integer :: reals
+    
+    Integer, Dimension( 1:3 ), Intent( In ) :: nc_block
+    Integer,                   Intent( In ) :: accuracy
+    
+    Integer :: grid
+    Integer :: fd
+    
+    grid = Product( nc_block )
+    fd   = Product( nc_block + 1 + accuracy )
+    
+    reals = grid + fd
+    
+  End Function usage
+  
 End Module FD_Laplacian_3d_module
