@@ -367,15 +367,15 @@ Contains
     Call FD%FD_init( max_deriv, order, vecs )
 
     FD%nc_block = 1
-    Do While( usage( FD%nc_block, FD%get_order() ) < n_cache )
+    Do While( usage( FD%nc_block, 2 * FD%get_order() ) < n_cache )
        FD%nc_block = FD%nc_block + 1
     End Do
     FD%nc_block( 1 ) = FD%nc_block( 1 ) + 1
-    If( usage( FD%nc_block, FD%get_order() ) >= n_cache ) Then
+    If( usage( FD%nc_block, 2 * FD%get_order() ) >= n_cache ) Then
        FD%nc_block( 1 ) = FD%nc_block( 1 ) - 1
     Else
        FD%nc_block( 2 ) = FD%nc_block( 2 ) + 1
-       If( usage( FD%nc_block, FD%get_order() ) >= n_cache ) Then
+       If( usage( FD%nc_block, 2 * FD%get_order() ) >= n_cache ) Then
           FD%nc_block( 2 ) = FD%nc_block( 2 ) - 1
        End If
     End If
@@ -390,6 +390,23 @@ Contains
     End Do
     
   End Subroutine init
+
+  Subroutine apply( FD, l1, l2, l3, s1, s2, s3, f1, f2, f3, grid, Laplacian )
+
+    Class( FD_Laplacian_3d )              , Intent(   Out ) :: FD
+    Integer                               , Intent( In    ) :: l1 ! lower bounds
+    Integer                               , Intent( In    ) :: l2
+    Integer                               , Intent( In    ) :: l3
+    Integer                               , Intent( In    ) :: s1 ! start point for calculation
+    Integer                               , Intent( In    ) :: s2
+    Integer                               , Intent( In    ) :: s3
+    Integer                               , Intent( In    ) :: f1 ! final point for calculation
+    Integer                               , Intent( In    ) :: f2
+    Integer                               , Intent( In    ) :: f3
+    Real( wp ), Dimension( l1:, l2:, l3: ), Intent( In    ) :: grid ! Thing to be differentiated
+    Real( wp ), Dimension( l1:, l2:, l3: ), Intent(   Out ) :: laplacian
+
+  End Subroutine apply
   
   Pure Function usage( nc_block, accuracy ) Result( reals )
     
