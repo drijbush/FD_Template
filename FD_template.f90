@@ -20,14 +20,17 @@ Module grid_vectors_module
      Real( wp ),                                 Private :: volume
      Real( wp ), Dimension( :, : ), Allocatable, Private :: inv_vecs
    Contains
-     Procedure, Public :: set_vecs
+     Procedure, Public :: set_dir_vecs
+     Procedure, Public :: get_dir_vec
+     Procedure, Public :: get_volume
+     Procedure, Public :: get_inv_vec
   End type grid_vectors
   
   Private
 
 Contains
 
-  Subroutine set_vecs( g, vecs )
+  Subroutine set_dir_vecs( g, vecs )
 
     Class( grid_vectors )        , Intent( InOut ) :: g
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
@@ -39,7 +42,39 @@ Contains
     Call givens_invert( g%dir_vecs, g%inv_vecs, V )
     g%volume = Abs( V )
     
-  End Subroutine set_vecs
+  End Subroutine set_dir_vecs
+
+  Pure Function get_dir_vec( g, which ) Result( v )
+
+    Real( wp ), Dimension( : ), Allocatable :: v
+    
+    Class( grid_vectors ), Intent( In ) :: g
+    Integer              , Intent( In ) :: which
+
+    v = g%dir_vecs( :, which )
+    
+  End Function get_dir_vec
+
+  Pure Function get_inv_vec( g, which ) Result( v )
+
+    Real( wp ), Dimension( : ), Allocatable :: v
+    
+    Class( grid_vectors ), Intent( In ) :: g
+    Integer              , Intent( In ) :: which
+
+    v = g%inv_vecs( which, : )
+    
+  End Function get_inv_vec
+
+  Pure Function get_volume( g ) Result( V )
+
+    Real( wp ) :: V
+    
+    Class( grid_vectors ), Intent( In ) :: g
+
+    V = g%volume
+
+  End Function get_volume
 
   Subroutine givens_invert( A, B, det )
 
@@ -160,7 +195,7 @@ Module FD_template_module
 
   Private
 
-  Type, Abstract, Extends( grid_vectors ) :: FD_template
+  Type, Abstract, Extends( grid_vectors ), Public :: FD_template
      Integer                                   , Private :: max_deriv
      Integer                                   , Private :: order
      Real( wp ), Dimension( :, : ), Allocatable, Private :: weights
@@ -179,7 +214,7 @@ Contains
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
 
     Call FD%set_order( max_deriv, order )
-    Call FD%set_vecs( vecs )
+    Call FD%set_dir_vecs( vecs )
 
   End Subroutine init
   
@@ -255,3 +290,20 @@ Contains
   End Subroutine weights
 
 End Module FD_template_module
+
+Module FD_Laplacian_3d_module
+
+  Use numbers_module    , Only : wp
+  Use FD_template_module, Only : FD_template
+  
+  Implicit None
+
+  Type, Extends( FD_template ), Public :: FD_Laplacian_3d
+     
+  End type FD_Laplacian_3d
+
+  Private
+
+Contains
+
+End Module FD_Laplacian_3d_module
