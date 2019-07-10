@@ -1,5 +1,13 @@
 Program testit
-
+  !!----------------------------------------------------
+  !! Program to test the execution of the finite difference
+  !! library by calculating the charge from a screened
+  !! Gaussian according to
+  !! $$ \rho _i^s(\mathbf r)=-q_i\left(\frac{\alpha }{\sqrt{\pi }}\right)^3e^{-\alpha^2 |\mathbf r-\mathbf r_i|^2} $$
+  !!
+  !! Written by I.J. Bush
+  !!----------------------------------------------------
+  
   Use numbers_module        , Only : wp
   Use FD_Laplacian_3d_module, Only : FD_Laplacian_3D
 
@@ -21,7 +29,7 @@ Program testit
   Real( wp ) :: arg
   Real( wp ) :: gauss, gauss_x2, gauss_y2, gauss_z2
 
-  Integer, Dimension( 1:3 ) :: ng, nt
+  Integer, Dimension( 1:3 ) :: grid_size, grid_with_halo
 
   Integer :: order
   Integer :: i3, i2, i1
@@ -39,19 +47,28 @@ Program testit
   Write( *, * ) 'order ?'
   Read ( *, * ) order
 
-  Write( *, * ) 'ng ?'
-  Read ( *, * ) ng
+  Write( *, * ) 'grid_size ?'
+  Read ( *, * ) grid_size
 
-  nt = ng + order / 2
+  grid_with_halo = grid_size + order / 2
 
-  Allocate(         grid( -nt( 1 ):nt( 1 ), -nt( 2 ):nt( 2 ), -nt( 3 ):nt( 3 ) ) )
-  Allocate(    laplacian( -nt( 1 ):nt( 1 ), -nt( 2 ):nt( 2 ), -nt( 3 ):nt( 3 ) ) )
-  Allocate( fd_laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) )
+  Allocate( grid( &
+    & -grid_with_halo( 1 ):grid_with_halo( 1 ), &
+    & -grid_with_halo( 2 ):grid_with_halo( 2 ), &
+    & -grid_with_halo( 3 ):grid_with_halo( 3 ) ) )
+  Allocate( laplacian( &
+    & -grid_with_halo( 1 ):grid_with_halo( 1 ), &
+    & -grid_with_halo( 2 ):grid_with_halo( 2 ), &
+    & -grid_with_halo( 3 ):grid_with_halo( 3 ) ) )
+  Allocate( fd_laplacian( &
+    & -grid_size( 1 ):grid_size( 1 ), &
+    & -grid_size( 2 ):grid_size( 2 ), &
+    & -grid_size( 3 ):grid_size( 3 ) ) )
 
   norm = ( alpha / Sqrt( 3.1415926535897932384626433832795_wp ) ) ** 3
-  Do i3 = -nt( 3 ), nt( 3 )
-    Do i2 = -nt( 2 ), nt( 2 )
-      Do i1 = -nt( 1 ), nt( 1 )
+  Do i3 = -grid_with_halo( 3 ), grid_with_halo( 3 )
+    Do i2 = -grid_with_halo( 2 ), grid_with_halo( 2 )
+      Do i1 = -grid_with_halo( 1 ), grid_with_halo( 1 )
         r = i1 * grid_vecs( :, 1 ) + i2 * grid_vecs( :, 2 ) + i3 * grid_vecs( :, 3 ) - ri
         arg = alpha_sq * Dot_Product( r, r )
         gauss = norm * Exp( - arg )
@@ -68,12 +85,18 @@ Program testit
   End Do
 
   Call FD%init( order, grid_vecs )
-  Call FD%apply( -nt, -ng, &
-    -ng, ng, &
+  Call FD%apply( -grid_with_halo, -grid_size, &
+    -grid_size, grid_size, &
     grid, fd_laplacian )
 
   Write( *, * ) Maxval( Abs( fd_laplacian - &
-    laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) ) )
-  Write( *, * ) Maxval( Abs( laplacian( -ng( 1 ):ng( 1 ), -ng( 2 ):ng( 2 ), -ng( 3 ):ng( 3 ) ) ) )
+    laplacian( &
+    & -grid_size( 1 ):grid_size( 1 ), &
+    & -grid_size( 2 ):grid_size( 2 ), &
+    & -grid_size( 3 ):grid_size( 3 ) ) ) )
+  Write( *, * ) Maxval( Abs( laplacian( &
+    & -grid_size( 1 ):grid_size( 1 ), &
+    & -grid_size( 2 ):grid_size( 2 ), &
+    & -grid_size( 3 ):grid_size( 3 ) ) ) )
 
 End Program testit

@@ -1,10 +1,25 @@
 Module grid_vectors_module
+  !!----------------------------------------------------
+  !! Module containing type and functions pertaining to
+  !! calculating finite-difference grid contributions
+  !! for non-orthonormal grids.
+  !!
+  !! Written by I.J. Bush
+  !!----------------------------------------------------
+
+
 
   Use numbers_module, Only : wp
 
   Implicit None
 
   Type, Public :: grid_vectors
+    !!----------------------------------------------------
+    !! Type to handle grids of arbitrary size and orientation
+    !! and the calculation of relevant parameters thereof
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
     Real( wp ), Dimension( :, : ), Allocatable, Private :: dir_vecs
     Real( wp ),                                 Private :: volume
     Real( wp ), Dimension( :, : ), Allocatable, Private :: inv_vecs
@@ -20,6 +35,13 @@ Module grid_vectors_module
 Contains
 
   Subroutine set_dir_vecs( g, vecs )
+    !!----------------------------------------------------
+    !! Set grid vectors as an NxN array (vecs) and thereby
+    !! calculate the various properties for use with the
+    !! rest of the solvers
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
 
     Class( grid_vectors )        , Intent( InOut ) :: g
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
@@ -35,6 +57,12 @@ Contains
   End Subroutine set_dir_vecs
 
   Pure Function get_dir_vec( g, which ) Result( v )
+    !!----------------------------------------------------
+    !! Get the direction of a given (which) vector from
+    !! the direction vecs
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
 
     Real( wp ), Dimension( : ), Allocatable :: v
 
@@ -46,6 +74,12 @@ Contains
   End Function get_dir_vec
 
   Pure Function get_inv_vec( g, which ) Result( v )
+    !!----------------------------------------------------
+    !! Get the inverse direction of a given (which) vector from
+    !! the direction vecs
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
 
     Real( wp ), Dimension( : ), Allocatable :: v
 
@@ -57,6 +91,11 @@ Contains
   End Function get_inv_vec
 
   Pure Function get_volume( g ) Result( V )
+    !!----------------------------------------------------
+    !! Get the volume element from the vectors
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
 
     Real( wp ) :: V
 
@@ -67,22 +106,25 @@ Contains
   End Function get_volume
 
   Subroutine givens_invert( A, B, det )
-
-    ! Invert the matrix B, returning the inverse in B
-    ! and the determinant of A in det
-
-    ! NOT FOR USE ON LARGE MATRICES
-
-    ! Really designed as a robust, not totally disastorous, way
-    ! to find inverse lattice vectors and the volume of the unit cell
-    ! ( i.e. the determinant )
-
-    ! The method used is to QR factorise ( in fact LQ factorise ),
-    ! invert the triangular matrix and the from that form the
-    ! inverse of the original matrix. The determinant is simply the
-    ! product of the diagonal elements of the diagonal matrix.
-    ! Method chosen as easy to implement and nicely numerically stable,
-    ! especially for the small matrices need here.
+    !!----------------------------------------------------
+    !! Invert the matrix A, returning the inverse in B
+    !! and the determinant of A in det
+    !!
+    !! NOT FOR USE ON LARGE MATRICES
+    !!
+    !! Really designed as a robust, not totally disastorous, way
+    !! to find inverse lattice vectors and the volume of the unit cell
+    !! ( i.e. the determinant )
+    !!
+    !! The method used is to QR factorise ( in fact LQ factorise ),
+    !! invert the triangular matrix and the from that form the
+    !! inverse of the original matrix. The determinant is simply the
+    !! product of the diagonal elements of the diagonal matrix.
+    !! Method chosen as easy to implement and nicely numerically stable,
+    !! especially for the small matrices need here.
+    !!
+    !! Written by I.J. Bush
+    !!----------------------------------------------------
 
     Real( wp ), Dimension( 1:, 1: ), Intent( In    )           :: A
     Real( wp ), Dimension( 1:, 1: ), Intent(   Out )           :: B
