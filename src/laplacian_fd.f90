@@ -65,7 +65,7 @@ Contains
 
   Subroutine reset_vecs( FD, vecs )
     !!-----------------------------------------------------------
-    !! Calculate weights due to grid offset for non orthogonal grids
+    !! Calculate weights due to grid offset for non-orthogonal grids
     !!
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
@@ -87,13 +87,18 @@ Contains
   End Subroutine reset_vecs
 
   Subroutine apply( FD, grid_lb, lap_lb, start, final, grid, laplacian )
-
+    !!-----------------------------------------------------------
+    !! Calculate the resulting derivative by applying sequentially
+    !! to the precalculated cache-blocks
+    !!
+    !! Written by I.J. Bush
+    !!-----------------------------------------------------------
     Class( FD_Laplacian_3d )                 , Intent( In    ) :: FD
-    Integer, Dimension(3)                    , Intent( In    ) :: grid_lb ! lower bounds grid
-    Integer, Dimension(3)                    , Intent( In    ) :: lap_lb ! lower bounds laplacian
-    Integer, Dimension(3)                    , Intent( In    ) :: start ! start point for calculation
-    Integer, Dimension(3)                    , Intent( In    ) :: final ! final point for calculation
-    Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid ! Thing to be differentiated
+    Integer, Dimension(3)                    , Intent( In    ) :: grid_lb !! lower bounds grid
+    Integer, Dimension(3)                    , Intent( In    ) :: lap_lb !! lower bounds laplacian
+    Integer, Dimension(3)                    , Intent( In    ) :: start !! start point for calculation
+    Integer, Dimension(3)                    , Intent( In    ) :: final !! final point for calculation
+    Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid !! Thing to be differentiated
     Real( wp ), Dimension( lap_lb(1):, lap_lb(2):, lap_lb(3): ), Intent(   Out ) :: laplacian
 
     Real( wp ), Dimension( : ), Allocatable :: w1, w2
