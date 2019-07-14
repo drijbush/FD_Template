@@ -74,8 +74,7 @@ Contains
 
   Pure Function get_inv_vec( g, which ) Result( v )
     !!----------------------------------------------------
-    !! Get the inverse direction of a given (which) vector from
-    !! the direction vecs
+    !! Get the inverse direction vectors
     !!
     !! Written by I.J. Bush
     !!----------------------------------------------------
@@ -159,7 +158,7 @@ Contains
     LQ_factorise: Do m = 2, dim
       Do n = 1, m - 1
         ! For element mn generate the rotation which
-        ! will zweo that element
+        ! will zero that element
         ann = L( n, n )
         anm = L( n, m )
         theta = atan2( - anm, ann )
