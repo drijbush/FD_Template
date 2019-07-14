@@ -38,8 +38,10 @@ Contains
     Integer                      , Intent( In    ) :: order
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
 
+    ! Set the order and vectors associated witht the basic template
     Call FD%FD_init( 2, order / 2, vecs )
 
+    ! Try to calculate some cache blocking parameters
     FD%nc_block = 1
 
     Do While( usage( FD%nc_block, 2 * FD%get_order() ) < n_cache )
@@ -59,6 +61,7 @@ Contains
       End If
     End If
 
+    ! Set the weights for the derivatives on the different directions
     Call FD%reset_vecs( vecs )
 
   End Subroutine init
@@ -66,6 +69,9 @@ Contains
   Subroutine reset_vecs( FD, vecs )
     !!-----------------------------------------------------------
     !! Calculate weights due to grid offset for non-orthogonal grids
+    !! This is separated from the init as this is the onlt part that needs
+    !! to be called if the vectors describing the grid change - hence the name
+    !! reset_vecs
     !!
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
@@ -74,6 +80,8 @@ Contains
 
     Integer :: this
     Integer :: i, j
+
+    Call FD%set_dir_vecs( vecs )
 
     this = 0
     Do i = 1, 3

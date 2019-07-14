@@ -49,7 +49,6 @@ Contains
     Real( wp ) :: V
 
     g%dir_vecs = vecs
-    Allocate( g%inv_vecs, Mold = g%dir_vecs )
 
     Call givens_invert( g%dir_vecs, g%inv_vecs, V )
     g%volume = Abs( V )
@@ -126,9 +125,9 @@ Contains
     !! Written by I.J. Bush
     !!----------------------------------------------------
 
-    Real( wp ), Dimension( 1:, 1: ), Intent( In    )           :: A
-    Real( wp ), Dimension( 1:, 1: ), Intent(   Out )           :: B
-    Real( wp )                     , Intent(   Out ), Optional :: det
+    Real( wp ), Dimension( 1:, 1: ),               Intent( In    )           :: A
+    Real( wp ), Dimension(  :,  : ), Allocatable,  Intent(   Out )           :: B
+    Real( wp )                     ,               Intent(   Out ), Optional :: det
 
     Real( wp ), Dimension( :, : ), Allocatable :: Q, L
 
@@ -141,6 +140,8 @@ Contains
     Integer :: dim
     Integer :: m, n
     Integer :: i
+
+    Allocate( B, Mold = A )
 
     ! Size of the problem
     dim = Size( A, dim = 1 )
