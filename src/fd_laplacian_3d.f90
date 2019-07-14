@@ -7,12 +7,12 @@ Module FD_Laplacian_3d_module
 
   Integer, Parameter :: n_cache = ( 2 ** 18 ) / ( 8 ) ! Number of reals in cache
 
-  Integer, Parameter, Public :: XX = 1
-  Integer, Parameter, Public :: XY = 2
-  Integer, Parameter, Public :: XZ = 3
-  Integer, Parameter, Public :: YY = 4
-  Integer, Parameter, Public :: YZ = 5
-  Integer, Parameter, Public :: ZZ = 6
+  Integer, Parameter, Private :: XX = 1
+  Integer, Parameter, Private :: XY = 2
+  Integer, Parameter, Private :: XZ = 3
+  Integer, Parameter, Private :: YY = 4
+  Integer, Parameter, Private :: YZ = 5
+  Integer, Parameter, Private :: ZZ = 6
 
   Type, Extends( FD_template ), Public :: FD_Laplacian_3d
     Integer   , Dimension( 1:3 ), Private :: nc_block
@@ -178,14 +178,14 @@ Contains
         Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
           ! FD x^2, y^2, z^2 at grid point
-          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( 1 ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 4 ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( 6 ) * grid( i1, i2, i3 )
+          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
+          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
+          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
 
           ! FD x^2
           Do it = 1, order
 
-            fac1 = w2( it ) * deriv_weights( 1 )
+            fac1 = w2( it ) * deriv_weights( XX )
             st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac1 * st1
 
@@ -201,11 +201,11 @@ Contains
         Do it = 1, order
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-            fac2 = w2( it ) * deriv_weights( 4 )
+            fac2 = w2( it ) * deriv_weights( YY )
             st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac2 * st2
 
-            fac3 = w2( it ) * deriv_weights( 6 )
+            fac3 = w2( it ) * deriv_weights( ZZ )
             st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac3 * st3
 
@@ -215,14 +215,14 @@ Contains
     End Do
 
     ! xy
-    If( Abs( deriv_weights( 2 ) ) > orthog_tol ) Then
+    If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
         Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do it2 = 1, order
             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
               ! first derivs have zero weight at the grid point for central differences
               Do it1 = 1, order
-                fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( 2 )
+                fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
                 st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
                   ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
                 laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
@@ -234,14 +234,14 @@ Contains
     End If
 
     ! xz
-    If( Abs( deriv_weights( 3 ) ) > orthog_tol ) Then
+    If( Abs( deriv_weights( XZ ) ) > orthog_tol ) Then
       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
         Do it3 = 1, order
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
               ! first derivs have zero weight at the grid point for central differences
               Do it1 = 1, order
-                fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( 3 )
+                fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
                 st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
                   ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
                 laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
@@ -253,14 +253,14 @@ Contains
     End If
 
     ! yz
-    If( Abs( deriv_weights( 5 ) ) > orthog_tol ) Then
+    If( Abs( deriv_weights( YZ ) ) > orthog_tol ) Then
       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
         Do it3 = 1, order
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
             ! first derivs have zero weight at the grid point for central differences
             Do it2 = 1, order
               Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( 5 )
+                fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
                 st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
                   ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
                 laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
