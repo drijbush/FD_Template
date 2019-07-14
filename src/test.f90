@@ -34,6 +34,7 @@ Program testit
 
   Integer :: order
   Integer :: i3, i2, i1
+  Integer :: start, finish, rate
 
   Write( *, * ) 'Grid vecs?'
   Read ( *, * ) grid_vecs
@@ -66,6 +67,7 @@ Program testit
     & -grid_size( 2 ):grid_size( 2 ), &
     & -grid_size( 3 ):grid_size( 3 ) ) )
 
+  Call system_clock( start, rate )
   norm = ( alpha / Sqrt( 3.1415926535897932384626433832795_wp ) ) ** 3
   Do i3 = -grid_with_halo( 3 ), grid_with_halo( 3 )
     Do i2 = -grid_with_halo( 2 ), grid_with_halo( 2 )
@@ -84,11 +86,14 @@ Program testit
       End Do
     End Do
   End Do
+  Call system_clock( finish, rate )
+  Write( *, '( a, t30, f8.3 )' ) 'Time for griding charge', Real( finish - start ) / rate
 
   Call FD%init( order, grid_vecs )
-  Call FD%apply( -grid_with_halo, -grid_size, &
-    -grid_size, grid_size, &
-    grid, fd_laplacian )
+  Call system_clock( start, rate )
+  Call FD%apply( -grid_with_halo, -grid_size, -grid_size, grid_size, grid, fd_laplacian )
+  Call system_clock( finish, rate )
+  Write( *, '( a, t30, f8.3 )' ) 'Time for FD laplacian', Real( finish - start ) / rate
 
   max_error =  Maxval( Abs( fd_laplacian - &
     laplacian( &
