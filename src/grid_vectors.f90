@@ -118,7 +118,7 @@ Contains
     !! The method used is to QR factorise ( in fact LQ factorise ),
     !! invert the triangular matrix and the from that form the
     !! inverse of the original matrix. The determinant is simply the
-    !! product of the diagonal elements of the diagonal matrix.
+    !! product of the diagonal elements of the triangular matrix.
     !! Method chosen as easy to implement and nicely numerically stable,
     !! especially for the small matrices need here.
     !!
