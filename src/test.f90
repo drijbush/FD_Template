@@ -118,7 +118,7 @@ Program testit
      End Do
   End Do
   Write( *, '( a, t40, ": ", g22.16, a, g22.16 )' ) &
-       'Maximum error relative in laplacian', max_rel_error, ' where laplacian = ', rel_value
+       'Maximum relative error in laplacian', max_rel_error, ' where laplacian = ', rel_value
   Write( *, '( a, t40, ": ", g22.16 )' ) 'Maximum value of laplacian ', &
        Maxval( Abs( laplacian( &
     & -grid_size( 1 ):grid_size( 1 ), &
