@@ -17,6 +17,7 @@ Module FD_Laplacian_3d_module
   Type, Extends( FD_template ), Public :: FD_Laplacian_3d
     Integer   , Dimension( 1:3 ), Private :: nc_block
     Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
+    Real( wp )                  , Private :: diag_inv
   Contains
     Procedure, Public :: init
     Procedure, Public :: reset_vecs
@@ -79,6 +80,8 @@ Contains
     Class( FD_Laplacian_3d )     , Intent( InOut ) :: FD
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
 
+    Real( wp ), Dimension( : ), Allocatable :: w2
+
     Integer :: this
     Integer :: i, j
 
@@ -92,6 +95,10 @@ Contains
         If( i /= j ) FD%deriv_weights( this ) = 2.0_wp * FD%deriv_weights( this )
       End Do
     End Do
+
+    w2 = FD%get_weight( 2 )
+    ! Note allocation on assignment means indexing starts at 1
+    FD%diag_inv = 1.0_wp / ( w2( 1 ) * ( FD%deriv_weights( XX ) + FD%deriv_weights( YY ) + FD%deriv_weights( ZZ ) ) )
 
   End Subroutine reset_vecs
 
@@ -274,7 +281,7 @@ Contains
 
   End Subroutine apply_block
 
-  Subroutine jacobi_sweep( FD, grid_lb, lap_lb, start, final, grid, laplacian )
+  Subroutine jacobi_sweep( FD, grid_lb, lap_lb, start, final, jac_weight, grid, soln_in, soln_out, E )
     !!-----------------------------------------------------------
     !! Calculate the resulting derivative by applying sequentially
     !! to the precalculated cache-blocks
@@ -282,14 +289,21 @@ Contains
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
     Class( FD_Laplacian_3d )                                      , Intent( In    ) :: FD
-    Integer, Dimension(3)                                         , Intent( In    ) :: grid_lb   !! lower bounds grid
-    Integer, Dimension(3)                                         , Intent( In    ) :: lap_lb    !! lower bounds laplacian
-    Integer, Dimension(3)                                         , Intent( In    ) :: start     !! start point for calculation
-    Integer, Dimension(3)                                         , Intent( In    ) :: final     !! final point for calculation
-    Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid      !! Thing to be differentiated
-    Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: laplacian
+    Integer, Dimension(3)                                         , Intent( In    ) :: grid_lb    !! lower bounds grid
+    Integer, Dimension(3)                                         , Intent( In    ) :: lap_lb     !! lower bounds laplacian
+    Integer, Dimension(3)                                         , Intent( In    ) :: start      !! start point for calculation
+    Integer, Dimension(3)                                         , Intent( In    ) :: final      !! final point for calculation
+    Real( wp )                                                    , Intent( In    ) :: jac_weight !! The weight for the weighted jacobi
+    Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid       !! Thing to be differentiated
+    Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent( In    ) :: soln_in    !! Solution at start of sweep 
+    Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: soln_out   !! Solution at end of sweep
+    Real( wp )                                                    , Intent(   Out ) :: E          !! The "Energy"
 
     Real( wp ), Dimension( : ), Allocatable :: w1, w2
+
+    ! IMPORTANT: E_loc must have save to make sure it is a shared variable so OMP
+    ! can apply a reduction - htread safety has been carefully thought about here!
+    Real( wp ), Save :: E_loc
 
     Integer :: order
 
@@ -300,21 +314,24 @@ Contains
     w1 = FD%get_weight( 1 )
     w2 = FD%get_weight( 2 )
 
-    !$omp do collapse( 3 )
+    E_loc = 0.0_wp
+    !$omp do collapse( 3 ) reduction( +:E_loc )
     Do i_block_3 = start(3), final(3), FD%nc_block( 3 )
       Do i_block_2 = start(2), final(2), FD%nc_block( 2 )
         Do i_block_1 = start(1), final(1), FD%nc_block( 1 )
-!!$          Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
-!!$            grid_lb, lap_lb, FD%nc_block, final, &
-!!$            order, w1, w2, FD%deriv_weights, grid, laplacian )
+          Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
+            grid_lb, lap_lb, FD%nc_block, final, &
+            order, FD%diag_inv, w1, w2, FD%deriv_weights, jac_weight, grid, &
+            soln_in, soln_out, E_loc )
         End Do
       End Do
     End Do
     !$omp end do
+    E = E_loc
 
   End Subroutine jacobi_sweep
 
-  Pure Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, jac_weight, grid, diag_inv, soln_in, &
+  Pure Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, diag_inv, w1, w2, deriv_weights, jac_weight, grid, soln_in, &
        soln_out, E )
 
     !!-----------------------------------------------------------
@@ -330,12 +347,12 @@ Contains
     Integer, Dimension( 1:3 )       ,                      Intent( In    ) :: nb            !! Cache blocking factors
     Integer, Dimension( 1:3 )       ,                      Intent( In    ) :: f             !! Where to finish
     Integer                         ,                      Intent( In    ) :: order         !! Order of the FD approximation
+    Real( wp )                      ,                      Intent( In    ) :: diag_inv      !! Inverse of the diagonal element of the matrix
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w1            !! FD Weights for first derivs
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w2            !! FD Weights for second derivs
     Real( wp ), Dimension( 1:6     ),                      Intent( In    ) :: deriv_weights !! See below
     Real( wp )                                           , Intent( In    ) :: jac_weight    !! The weight of the NEW solution 
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
-    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: diag_inv      !! Inverse of the diagonal elements
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( In    ) :: soln_in       !! The solution on input
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: soln_out      !! The updated solution
     Real( wp )                                           , Intent( InOut ) :: E             !! The "Energy"
@@ -364,7 +381,7 @@ Contains
        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-             new_soln = soln_in( i1, i2, i3 )
+             new_soln = grid( i1, i2, i3 )
 
 !!$          ! FD x^2, y^2, z^2 at grid point
 !!$          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
@@ -375,7 +392,7 @@ Contains
              Do it = 1, order
 
                 fac1 = w2( it ) * deriv_weights( XX )
-                st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
+                st1 = ( soln_in( i1 + it, i2     , i3      ) + soln_in( i1 - it, i2     , i3       ) )
                 new_soln = new_soln - fac1 * st1
 
              End Do
@@ -393,11 +410,11 @@ Contains
              Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
                 fac2 = w2( it ) * deriv_weights( YY )
-                st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
+                st2 = ( soln_in( i1     , i2 + it, i3      ) + soln_in( i1     , i2 - it, i3       ) )
                 soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac2 * st2
 
                 fac3 = w2( it ) * deriv_weights( ZZ )
-                st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
+                st3 = ( soln_in( i1     , i2     , i3 + it ) + soln_in( i1     , i2     , i3 - it  ) )
                 soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac3 * st3
 
              End Do
@@ -409,13 +426,13 @@ Contains
     If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                ! first derivs have zero weight at the grid point for central differences
-                Do it2 = 1, order
+             ! first derivs have zero weight at the diag point for central differences
+             Do it2 = 1, order
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
                    Do it1 = 1, order
                       fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
-                      st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
-                           ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
+                      st12 = soln_in( i1 + it1, i2 + it2, i3 ) - soln_in( i1 - it1, i2 + it2, i3 ) - &
+                           ( soln_in( i1 + it1, i2 - it2, i3 ) - soln_in( i1 - it1, i2 - it2, i3 ) )
                       soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac12 * st12
                    End Do
                 End Do
@@ -430,11 +447,11 @@ Contains
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
                 Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                   ! first derivs have zero weight at the grid point for central differences
+                   ! first derivs have zero weight at the diag point for central differences
                    Do it1 = 1, order
                       fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
-                      st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
-                           ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
+                      st13 = soln_in( i1 + it1, i2, i3 + it3 ) - soln_in( i1 - it1, i2, i3 + it3 ) - &
+                           ( soln_in( i1 + it1, i2, i3 - it3 ) - soln_in( i1 - it1, i2, i3 - it3 ) )
                       soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac13 * st13
                    End Do
                 End Do
@@ -448,12 +465,12 @@ Contains
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-                ! first derivs have zero weight at the grid point for central differences
+                ! first derivs have zero weight at the diag point for central differences
                 Do it2 = 1, order
                    Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
                       fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
-                      st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
-                           ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
+                      st23 = soln_in( i1, i2 + it2, i3 + it3 ) - soln_in( i1, i2 - it2, i3 + it3 )  - &
+                           ( soln_in( i1, i2 + it2, i3 - it3 ) - soln_in( i1, i2 - it2, i3 - it3 ) )
                       soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac23 * st23
                    End Do
                 End Do
@@ -467,8 +484,8 @@ Contains
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-             soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) * diag_inv( i1, i2, i3 )
-             soln_out( i1, i2, i3 ) = jac_weight * soln_out( i1, i2, i3 ) + ( 1.0_wp - jac_weight ) * soln_out( i1, i2, i3 )
+             soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) * diag_inv
+             soln_out( i1, i2, i3 ) = jac_weight * soln_out( i1, i2, i3 ) + ( 1.0_wp - jac_weight ) * soln_in( i1, i2, i3 )
              dE = dE + soln_out( i1, i2, i3 ) * grid( i1, i2, i3 )
           End Do
        End Do
