@@ -28,6 +28,7 @@ Program testit
   Real( wp ) :: norm
   Real( wp ) :: arg
   Real( wp ) :: gauss, gauss_x2, gauss_y2, gauss_z2
+  Real( wp ) :: max_error, rel_error, rel_value, max_rel_error
 
   Integer, Dimension( 1:3 ) :: grid_size, grid_with_halo
 
@@ -89,12 +90,32 @@ Program testit
     -grid_size, grid_size, &
     grid, fd_laplacian )
 
-  Write( *, * ) Maxval( Abs( fd_laplacian - &
+  max_error =  Maxval( Abs( fd_laplacian - &
     laplacian( &
     & -grid_size( 1 ):grid_size( 1 ), &
     & -grid_size( 2 ):grid_size( 2 ), &
     & -grid_size( 3 ):grid_size( 3 ) ) ) )
-  Write( *, * ) Maxval( Abs( laplacian( &
+  Write( *, '( a, t40, ": ", g22.16 )' ) 'Maximum error in laplacian', max_error
+  max_rel_error = -1.0_wp
+  rel_error = max_rel_error
+  Do i3 = - grid_size( 3 ), grid_size( 3 )
+     Do i2 = - grid_size( 2 ), grid_size( 2 )
+        Do i1 = - grid_size( 1 ), grid_size( 1 )
+           If( Abs( laplacian( i3, i2, i1 ) ) > 1.0e-12_wp ) Then
+              rel_error = Abs( fd_laplacian( i1, i2, i3 ) - laplacian( i1, i2, i3 ) )
+              rel_error = rel_error / Abs( laplacian( i1, i2, i3 ) )
+              If( rel_error > max_rel_error ) Then
+                 max_rel_error = rel_error
+                 rel_value = laplacian( i1, i2, i3 )
+              End If
+           End If
+        End Do
+     End Do
+  End Do
+  Write( *, '( a, t40, ": ", g22.16, a, g22.16 )' ) &
+       'Maximum error relative in laplacian', max_rel_error, ' where laplacian = ', rel_value
+  Write( *, '( a, t40, ": ", g22.16 )' ) 'Maximum value of laplacian ', &
+       Maxval( Abs( laplacian( &
     & -grid_size( 1 ):grid_size( 1 ), &
     & -grid_size( 2 ):grid_size( 2 ), &
     & -grid_size( 3 ):grid_size( 3 ) ) ) )
