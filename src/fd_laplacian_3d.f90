@@ -154,7 +154,7 @@ Contains
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w2            !! FD Weights for second derivs
     Real( wp ), Dimension( 1:6     ),                      Intent( In    ) :: deriv_weights !! See below
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
-    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian     !! The result
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent(   Out ) :: laplacian     !! The result
 
     ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
@@ -304,9 +304,9 @@ Contains
     Do i_block_3 = start(3), final(3), FD%nc_block( 3 )
       Do i_block_2 = start(2), final(2), FD%nc_block( 2 )
         Do i_block_1 = start(1), final(1), FD%nc_block( 1 )
-          Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
-            grid_lb, lap_lb, FD%nc_block, final, &
-            order, w1, w2, FD%deriv_weights, grid, laplacian )
+!!$          Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
+!!$            grid_lb, lap_lb, FD%nc_block, final, &
+!!$            order, w1, w2, FD%deriv_weights, grid, laplacian )
         End Do
       End Do
     End Do
@@ -314,7 +314,8 @@ Contains
 
   End Subroutine jacobi_sweep
 
-  Pure Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, grid, laplacian )
+  Pure Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, jac_weight, grid, diag_inv, soln_in, &
+       soln_out, E )
 
     !!-----------------------------------------------------------
     !! Apply the FD laplacian operator to part of the grid. An effort has been made
@@ -332,8 +333,12 @@ Contains
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w1            !! FD Weights for first derivs
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w2            !! FD Weights for second derivs
     Real( wp ), Dimension( 1:6     ),                      Intent( In    ) :: deriv_weights !! See below
+    Real( wp )                                           , Intent( In    ) :: jac_weight    !! The weight of the NEW solution 
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
-    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian     !! The result
+    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: diag_inv      !! Inverse of the diagonal elements
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( In    ) :: soln_in       !! The solution on input
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: soln_out      !! The updated solution
+    Real( wp )                                           , Intent( InOut ) :: E             !! The "Energy"
 
     ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
@@ -342,10 +347,12 @@ Contains
 
     Real( wp ), Parameter :: orthog_tol = 1.0e-14_wp
 
+    Real( wp ) :: new_soln
     Real( wp ) :: st1, st2, st3
     Real( wp ) :: fac1, fac2, fac3
     Real( wp ) :: st12, st13, st23
     Real( wp ) :: fac12, fac13, fac23
+    Real( wp ) :: dE
 
     Integer :: i3, i2, i1
     Integer :: it, it1, it2, it3
@@ -354,102 +361,119 @@ Contains
 
     ! First do the xx, yy, zz terms. Assume the weights of these are always non-zero
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
-      Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-        Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-          ! FD x^2, y^2, z^2 at grid point
-          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
+             new_soln = soln_in( i1, i2, i3 )
 
-          ! FD x^2
-          Do it = 1, order
+!!$          ! FD x^2, y^2, z^2 at grid point
+!!$          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
+!!$          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
+!!$          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
 
-            fac1 = w2( it ) * deriv_weights( XX )
-            st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac1 * st1
+             ! FD x^2
+             Do it = 1, order
+
+                fac1 = w2( it ) * deriv_weights( XX )
+                st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
+                new_soln = new_soln - fac1 * st1
+
+             End Do
+
+             soln_out( i1, i2, i3 ) = new_soln
 
           End Do
-
-        End Do
-      End Do
+       End Do
     End Do
 
     ! FD y^2, z^2
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-      Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-        Do it = 1, order
-          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do it = 1, order
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-            fac2 = w2( it ) * deriv_weights( YY )
-            st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac2 * st2
+                fac2 = w2( it ) * deriv_weights( YY )
+                st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
+                soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac2 * st2
 
-            fac3 = w2( it ) * deriv_weights( ZZ )
-            st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac3 * st3
+                fac3 = w2( it ) * deriv_weights( ZZ )
+                st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
+                soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac3 * st3
 
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End Do
 
     ! xy
     If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-          Do it2 = 1, order
-            Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-              ! first derivs have zero weight at the grid point for central differences
-              Do it1 = 1, order
-                fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
-                st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
-                  ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it2 = 1, order
+                   Do it1 = 1, order
+                      fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
+                      st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
+                           ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
+                      soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac12 * st12
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
 
     ! xz
     If( Abs( deriv_weights( XZ ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do it3 = 1, order
-          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-            Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-              ! first derivs have zero weight at the grid point for central differences
-              Do it1 = 1, order
-                fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
-                st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
-                  ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                   ! first derivs have zero weight at the grid point for central differences
+                   Do it1 = 1, order
+                      fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
+                      st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
+                           ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
+                      soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac13 * st13
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
 
     ! yz
     If( Abs( deriv_weights( YZ ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do it3 = 1, order
-          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-            ! first derivs have zero weight at the grid point for central differences
-            Do it2 = 1, order
-              Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
-                st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
-                  ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it2 = 1, order
+                   Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                      fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
+                      st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
+                           ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
+                      soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) - fac23 * st23
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
+
+    ! Scale by diag element inverse and weight as required, and calculate addition to energy
+    dE = 0.0_wp
+    Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+             soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) * diag_inv( i1, i2, i3 )
+             soln_out( i1, i2, i3 ) = jac_weight * soln_out( i1, i2, i3 ) + ( 1.0_wp - jac_weight ) * soln_out( i1, i2, i3 )
+             dE = dE + soln_out( i1, i2, i3 ) * grid( i1, i2, i3 )
+          End Do
+       End Do
+    End Do
+    E = E + 0.5_wp * dE
 
   End Subroutine jacobi_sweep_block
 
