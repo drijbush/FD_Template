@@ -5,7 +5,7 @@ Module FD_Laplacian_3d_module
 
   Implicit None
 
-  Integer, Parameter :: n_cache = ( 2 ** 18 ) / ( 8 ) ! Number of reals in cache
+  Integer, Parameter :: n_cache_default = ( 2 ** 18 ) / ( 8 ) ! Number of reals in cache
 
   Integer, Parameter, Private :: XX = 1
   Integer, Parameter, Private :: XY = 2
@@ -15,21 +15,23 @@ Module FD_Laplacian_3d_module
   Integer, Parameter, Private :: ZZ = 6
 
   Type, Extends( FD_template ), Public :: FD_Laplacian_3d
-    Integer   , Dimension( 1:3 ), Private :: nc_block
-    Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
-    Real( wp )                  , Private :: diag_inv
-  Contains
-    Procedure, Public :: init
-    Procedure, Public :: reset_vecs
-    Procedure, Public :: apply
-    Procedure, Public :: jacobi_sweep
+     Integer                     , Private :: n_cache = n_cache_default
+     Integer   , Dimension( 1:3 ), Private :: nc_block_apply
+     Integer   , Dimension( 1:3 ), Private :: nc_block_jacobi
+     Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
+     Real( wp )                  , Private :: diag_inv
+   Contains
+     Procedure, Public :: init
+     Procedure, Public :: reset_vecs
+     Procedure, Public :: apply
+     Procedure, Public :: jacobi_sweep
   End type FD_Laplacian_3d
 
   Private
 
 Contains
 
-  Subroutine init( FD, order, vecs )
+  Subroutine init( FD, order, vecs, n_cache )
     !!----------------------------------------------------
     !! Initialise Laplacian differentiator and calculate
     !! optimal blocking in cache.
@@ -39,32 +41,59 @@ Contains
     Class( FD_Laplacian_3d )     , Intent(   Out ) :: FD
     Integer                      , Intent( In    ) :: order
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
+    Integer   , Optional         , Intent( In    ) :: n_cache
 
     ! Set the order and vectors associated witht the basic template
     Call FD%FD_init( 2, order / 2, vecs )
 
-    ! Try to calculate some cache blocking parameters
-    FD%nc_block = 1
-
-    Do While( usage( FD%nc_block, 2 * FD%get_order() ) < n_cache )
-      FD%nc_block = FD%nc_block + 1
-    End Do
-
-    FD%nc_block( 1 ) = FD%nc_block( 1 ) + 1
-
-    If( usage( FD%nc_block, 2 * FD%get_order() ) >= n_cache ) Then
-      FD%nc_block( 1 ) = FD%nc_block( 1 ) - 1
-
-    Else
-      FD%nc_block( 2 ) = FD%nc_block( 2 ) + 1
-
-      If( usage( FD%nc_block, 2 * FD%get_order() ) >= n_cache ) Then
-        FD%nc_block( 2 ) = FD%nc_block( 2 ) - 1
-      End If
+    ! If given set the estimated size of cache in terms of the number of reals
+    ! it can gold
+    If( Present( n_cache ) ) Then
+       FD%n_cache = n_cache
     End If
 
+    ! Calculate some cache blocking parameters
+    FD%nc_block_apply  = get_cache_block_facs( FD%n_cache, 1, 1, 2 * FD%get_order() )
+    FD%nc_block_jacobi = get_cache_block_facs( FD%n_cache, 1, 2, 2 * FD%get_order() )
+    
     ! Set the weights for the derivatives on the different directions
     Call FD%reset_vecs( vecs )
+
+  Contains
+
+    Pure Function get_cache_block_facs( n_cache, n_grids, n_fd, accuracy ) Result( nb )
+
+      ! Calculate some cache blocking parameters
+
+      Integer, Dimension( 1:3 ) :: nb
+
+      Integer, Intent( In ) :: n_cache
+      Integer, Intent( In ) :: n_grids
+      Integer, Intent( In ) :: n_fd
+      Integer, Intent( In ) :: accuracy
+
+      nb = 1
+
+      Do While( usage( n_grids, n_fd, nb, accuracy ) < n_cache )
+         nb = nb + 1
+      End Do
+
+      nb( 1 ) = nb( 1 ) + 1
+
+      ! Use a strictly greater than relationship juts to allow
+      ! a little more leeway - the estimate cahce usage is probably slightly low ...
+      If( usage( n_grids, n_fd, nb, accuracy ) > n_cache ) Then
+         nb( 1 ) = nb( 1 ) - 1
+
+      Else
+         nb( 2 ) = nb( 2 ) + 1
+
+         If( usage( n_grids, n_fd, nb, accuracy ) > n_cache ) Then
+            nb( 2 ) = nb( 2 ) - 1
+         End If
+      End If
+
+    End Function get_cache_block_facs
 
   End Subroutine init
 
@@ -89,11 +118,11 @@ Contains
 
     this = 0
     Do i = 1, 3
-      Do j = i, 3
-        this = this + 1
-        FD%deriv_weights( this ) = Dot_Product( FD%get_inv_vec( i ), FD%get_inv_vec( j ) )
-        If( i /= j ) FD%deriv_weights( this ) = 2.0_wp * FD%deriv_weights( this )
-      End Do
+       Do j = i, 3
+          this = this + 1
+          FD%deriv_weights( this ) = Dot_Product( FD%get_inv_vec( i ), FD%get_inv_vec( j ) )
+          If( i /= j ) FD%deriv_weights( this ) = 2.0_wp * FD%deriv_weights( this )
+       End Do
     End Do
 
     w2 = FD%get_weight( 2 )
@@ -129,14 +158,14 @@ Contains
     w2 = FD%get_weight( 2 )
 
     !$omp do collapse( 3 )
-    Do i_block_3 = start(3), final(3), FD%nc_block( 3 )
-      Do i_block_2 = start(2), final(2), FD%nc_block( 2 )
-        Do i_block_1 = start(1), final(1), FD%nc_block( 1 )
-          Call apply_block( [ i_block_1, i_block_2, i_block_3 ], &
-            grid_lb, lap_lb, FD%nc_block, final, &
-            order, w1, w2, FD%deriv_weights, grid, laplacian )
-        End Do
-      End Do
+    Do i_block_3 = start(3), final(3), FD%nc_block_apply( 3 )
+       Do i_block_2 = start(2), final(2), FD%nc_block_apply( 2 )
+          Do i_block_1 = start(1), final(1), FD%nc_block_apply( 1 )
+             Call apply_block( [ i_block_1, i_block_2, i_block_3 ], &
+                  grid_lb, lap_lb, FD%nc_block_apply, final, &
+                  order, w1, w2, FD%deriv_weights, grid, laplacian )
+          End Do
+       End Do
     End Do
     !$omp end do
 
@@ -182,109 +211,109 @@ Contains
 
     ! First do the xx, yy, zz terms. Assume the weights of these are always non-zero
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
-      Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-        Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-          ! FD x^2, y^2, z^2 at grid point
-          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
-          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
+             ! FD x^2, y^2, z^2 at grid point
+             laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
+             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
+             laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
 
-          ! FD x^2
-          Do it = 1, order
+             ! FD x^2
+             Do it = 1, order
 
-            fac1 = w2( it ) * deriv_weights( XX )
-            st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac1 * st1
+                fac1 = w2( it ) * deriv_weights( XX )
+                st1 = ( grid( i1 + it, i2     , i3      ) + grid( i1 - it, i2     , i3       ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac1 * st1
+
+             End Do
 
           End Do
-
-        End Do
-      End Do
+       End Do
     End Do
 
     ! FD y^2, z^2
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-      Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-        Do it = 1, order
-          Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+       Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+          Do it = 1, order
+             Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
-            fac2 = w2( it ) * deriv_weights( YY )
-            st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac2 * st2
+                fac2 = w2( it ) * deriv_weights( YY )
+                st2 = ( grid( i1     , i2 + it, i3      ) + grid( i1     , i2 - it, i3       ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac2 * st2
 
-            fac3 = w2( it ) * deriv_weights( ZZ )
-            st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
-            laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac3 * st3
+                fac3 = w2( it ) * deriv_weights( ZZ )
+                st3 = ( grid( i1     , i2     , i3 + it ) + grid( i1     , i2     , i3 - it  ) )
+                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac3 * st3
 
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End Do
 
     ! xy
     If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-          Do it2 = 1, order
-            Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-              ! first derivs have zero weight at the grid point for central differences
-              Do it1 = 1, order
-                fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
-                st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
-                  ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+             Do it2 = 1, order
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                   ! first derivs have zero weight at the grid point for central differences
+                   Do it1 = 1, order
+                      fac12 = w1( it1 ) * w1( it2 ) * deriv_weights( XY )
+                      st12 = grid( i1 + it1, i2 + it2, i3 ) - grid( i1 - it1, i2 + it2, i3 ) - &
+                           ( grid( i1 + it1, i2 - it2, i3 ) - grid( i1 - it1, i2 - it2, i3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac12 * st12
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
 
     ! xz
     If( Abs( deriv_weights( XZ ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do it3 = 1, order
-          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-            Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-              ! first derivs have zero weight at the grid point for central differences
-              Do it1 = 1, order
-                fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
-                st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
-                  ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                   ! first derivs have zero weight at the grid point for central differences
+                   Do it1 = 1, order
+                      fac13 = w1( it1 ) * w1( it3 ) * deriv_weights( XZ )
+                      st13 = grid( i1 + it1, i2, i3 + it3 ) - grid( i1 - it1, i2, i3 + it3 ) - &
+                           ( grid( i1 + it1, i2, i3 - it3 ) - grid( i1 - it1, i2, i3 - it3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac13 * st13
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
 
     ! yz
     If( Abs( deriv_weights( YZ ) ) > orthog_tol ) Then
-      Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
-        Do it3 = 1, order
-          Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
-            ! first derivs have zero weight at the grid point for central differences
-            Do it2 = 1, order
-              Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
-                fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
-                st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
-                  ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
-                laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
-              End Do
-            End Do
+       Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
+          Do it3 = 1, order
+             Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
+                ! first derivs have zero weight at the grid point for central differences
+                Do it2 = 1, order
+                   Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
+                      fac23 = w1( it2 ) * w1( it3 ) * deriv_weights( YZ )
+                      st23 = grid( i1, i2 + it2, i3 + it3 ) - grid( i1, i2 - it2, i3 + it3 )  - &
+                           ( grid( i1, i2 + it2, i3 - it3 ) - grid( i1, i2 - it2, i3 - it3 ) )
+                      laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + fac23 * st23
+                   End Do
+                End Do
+             End Do
           End Do
-        End Do
-      End Do
+       End Do
     End If
 
   End Subroutine apply_block
 
   Subroutine jacobi_sweep( FD, grid_lb, lap_lb, start, final, jac_weight, grid, soln_in, soln_out, E )
     !!-----------------------------------------------------------
-    !! Calculate the resulting derivative by applying sequentially
-    !! to the precalculated cache-blocks
+    !! Use the finite difference approximation of the laplacian operator
+    !! to perform a sweep of the (weighted) Jacobi method
     !!
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
@@ -302,7 +331,7 @@ Contains
     Real( wp ), Dimension( : ), Allocatable :: w1, w2
 
     ! IMPORTANT: E_loc must have save to make sure it is a shared variable so OMP
-    ! can apply a reduction - htread safety has been carefully thought about here!
+    ! can apply a reduction - thread safety has been carefully thought about here!
     Real( wp ), Save :: E_loc
 
     Integer :: order
@@ -314,20 +343,27 @@ Contains
     w1 = FD%get_weight( 1 )
     w2 = FD%get_weight( 2 )
 
+    ! Use a temporary variable in case E is private in the calling routine
+    ! Doing it this way makes sure it always works
     E_loc = 0.0_wp
     !$omp do collapse( 3 ) reduction( +:E_loc )
-    Do i_block_3 = start(3), final(3), FD%nc_block( 3 )
-      Do i_block_2 = start(2), final(2), FD%nc_block( 2 )
-        Do i_block_1 = start(1), final(1), FD%nc_block( 1 )
-          Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
-            grid_lb, lap_lb, FD%nc_block, final, &
-            order, FD%diag_inv, w1, w2, FD%deriv_weights, jac_weight, grid, &
-            soln_in, soln_out, E_loc )
-        End Do
-      End Do
+    Do i_block_3 = start(3), final(3), FD%nc_block_jacobi( 3 )
+       Do i_block_2 = start(2), final(2), FD%nc_block_jacobi( 2 )
+          Do i_block_1 = start(1), final(1), FD%nc_block_jacobi( 1 )
+             Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
+                  grid_lb, lap_lb, FD%nc_block_apply, final, &
+                  order, FD%diag_inv, w1, w2, FD%deriv_weights, jac_weight, grid, &
+                  soln_in, soln_out, E_loc )
+          End Do
+       End Do
     End Do
     !$omp end do
+    ! E is likely to be shared, but doing it this way avoids potential races
+    ! as the implicit barrier at the end of single makes sure E is properly updated
+    ! before we continue
+    !$omp single
     E = E_loc
+    !$omp end single
 
   End Subroutine jacobi_sweep
 
@@ -335,8 +371,8 @@ Contains
        soln_out, E )
 
     !!-----------------------------------------------------------
-    !! Apply the FD laplacian operator to part of the grid. An effort has been made
-    !! to make sure the required data is in cache
+    !! Apply the FD laplacian operator to perform a Jacobi sweep on part of the grid
+    !! An effort has been made to make sure all the data fits in cache
     !!
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
@@ -382,11 +418,6 @@ Contains
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
 
              new_soln = grid( i1, i2, i3 )
-
-!!$          ! FD x^2, y^2, z^2 at grid point
-!!$          laplacian( i1, i2, i3 ) =                           w2( 0 ) * deriv_weights( XX ) * grid( i1, i2, i3 )
-!!$          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( YY ) * grid( i1, i2, i3 )
-!!$          laplacian( i1, i2, i3 ) = laplacian( i1, i2, i3 ) + w2( 0 ) * deriv_weights( ZZ ) * grid( i1, i2, i3 )
 
              ! FD x^2
              Do it = 1, order
@@ -494,22 +525,25 @@ Contains
 
   End Subroutine jacobi_sweep_block
 
-  Pure Function usage( nc_block, accuracy ) Result( reals )
+  Pure Function usage( n_grids, n_fd, nc_block, accuracy ) Result( reals )
     !!-----------------------------------------------------------
-    !! Estimate memory usage of current block size
+    !! Estimate memory usage of an algorithm that needs N_GRIDS grids
+    !! without halos and N_FD grids with halos
     !!
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
     Integer :: reals
 
+    Integer,                   Intent( In ) :: n_grids
+    Integer,                   Intent( In ) :: n_fd
     Integer, Dimension( 1:3 ), Intent( In ) :: nc_block
     Integer,                   Intent( In ) :: accuracy
 
     Integer :: grid
     Integer :: fd
 
-    grid = Product( nc_block )
-    fd   = Product( nc_block + 1 + accuracy )
+    grid = n_grids * Product( nc_block )
+    fd   = n_fd    * Product( nc_block + 1 + accuracy )
 
     reals = grid + fd
 
