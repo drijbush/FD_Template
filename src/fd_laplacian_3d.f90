@@ -5,7 +5,11 @@ Module FD_Laplacian_3d_module
 
   Implicit None
 
-  Integer, Parameter :: n_cache_default = ( 2 ** 18 ) / ( 8 ) ! Number of reals in cache
+  ! Default for orthogonality: If the dot product is less than this vecs are deemed orthogonal
+  Real( wp ), Parameter :: orthog_tol_default = 1.0e-14_wp 
+                                                 
+  ! Default number of reals in cache
+  Integer, Parameter :: n_cache_default = ( 2 ** 18 ) / ( 8 ) 
 
   Integer, Parameter, Private :: XX = 1
   Integer, Parameter, Private :: XY = 2
@@ -15,11 +19,15 @@ Module FD_Laplacian_3d_module
   Integer, Parameter, Private :: ZZ = 6
 
   Type, Extends( FD_template ), Public :: FD_Laplacian_3d
-     Integer                     , Private :: n_cache = n_cache_default
+     Integer                     , Private :: n_cache    = n_cache_default
+     Real( wp )                  , Private :: orthog_tol = orthog_tol_default 
      Integer   , Dimension( 1:3 ), Private :: nc_block_apply
      Integer   , Dimension( 1:3 ), Private :: nc_block_jacobi
      Real( wp ), Dimension( 1:6 ), Private :: deriv_weights
      Real( wp )                  , Private :: diag_inv
+     Logical                     , Private :: need_XY     ! Indicate if do  not need
+     Logical                     , Private :: need_XZ     ! these compinents due to
+     Logical                     , Private :: need_YZ     ! grid orthogonality
    Contains
      Procedure, Public :: init
      Procedure, Public :: reset_vecs
@@ -31,7 +39,7 @@ Module FD_Laplacian_3d_module
 
 Contains
 
-  Subroutine init( FD, order, vecs, n_cache )
+  Subroutine init( FD, order, vecs, n_cache, orthog_tol )
     !!----------------------------------------------------
     !! Initialise Laplacian differentiator and calculate
     !! optimal blocking in cache.
@@ -42,6 +50,7 @@ Contains
     Integer                      , Intent( In    ) :: order
     Real( wp ), Dimension( :, : ), Intent( In    ) :: vecs
     Integer   , Optional         , Intent( In    ) :: n_cache
+    Real( wp ), Optional         , Intent( In    ) :: orthog_tol
 
     ! Set the order and vectors associated witht the basic template
     Call FD%FD_init( 2, order / 2, vecs )
@@ -50,6 +59,11 @@ Contains
     ! it can gold
     If( Present( n_cache ) ) Then
        FD%n_cache = n_cache
+    End If
+
+    ! If present set the orthogonality tolerance
+    If( Present( orthog_tol ) ) Then
+       FD%orthog_tol = orthog_tol
     End If
 
     ! Calculate some cache blocking parameters
@@ -128,7 +142,11 @@ Contains
     w2 = FD%get_weight( 2 )
     ! Note allocation on assignment means indexing starts at 1
     FD%diag_inv = 1.0_wp / ( w2( 1 ) * ( FD%deriv_weights( XX ) + FD%deriv_weights( YY ) + FD%deriv_weights( ZZ ) ) )
-
+    ! Work out if we need the off diagonal derivatives
+    FD%need_XY = Abs( FD%deriv_weights( XY ) ) > FD%orthog_tol
+    FD%need_XZ = Abs( FD%deriv_weights( XZ ) ) > FD%orthog_tol
+    FD%need_YZ = Abs( FD%deriv_weights( YZ ) ) > FD%orthog_tol
+    
   End Subroutine reset_vecs
 
   Subroutine apply( FD, grid_lb, lap_lb, start, final, grid, laplacian )
@@ -163,7 +181,8 @@ Contains
           Do i_block_1 = start(1), final(1), FD%nc_block_apply( 1 )
              Call apply_block( [ i_block_1, i_block_2, i_block_3 ], &
                   grid_lb, lap_lb, FD%nc_block_apply, final, &
-                  order, w1, w2, FD%deriv_weights, grid, laplacian )
+                  order, w1, w2, FD%deriv_weights, FD%need_XY, FD%need_XZ, FD%need_YZ, &
+                  grid, laplacian )
           End Do
        End Do
     End Do
@@ -171,7 +190,8 @@ Contains
 
   End Subroutine apply
 
-  Pure Subroutine apply_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, grid, laplacian )
+  Subroutine apply_block( s, lg, ll, nb, f, order, w1, w2, deriv_weights, need_XY, need_XZ, need_YZ, &
+       grid, laplacian )
 
     !!-----------------------------------------------------------
     !! Apply the FD laplacian operator to part of the grid. An effort has been made
@@ -189,15 +209,16 @@ Contains
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w1            !! FD Weights for first derivs
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w2            !! FD Weights for second derivs
     Real( wp ), Dimension( 1:6     ),                      Intent( In    ) :: deriv_weights !! See below
+    Logical                                              , Intent( In    ) :: need_XY       !! Need the XY deriv
+    Logical                                              , Intent( In    ) :: need_XZ       !! Need the XZ deriv
+    Logical                                              , Intent( In    ) :: need_YZ       !! Need the YZ deriv
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
-    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent(   Out ) :: laplacian     !! The result
+    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: laplacian     !! The result
 
     ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
     ! as we must finite difference along the directions of the grid. deriv_weights are the d_xx, d_xy
     ! etc. coefficients in this expression
-
-    Real( wp ), Parameter :: orthog_tol = 1.0e-14_wp
 
     Real( wp ) :: st1, st2, st3
     Real( wp ) :: fac1, fac2, fac3
@@ -252,7 +273,7 @@ Contains
     End Do
 
     ! xy
-    If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
+    If( need_XY ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
              Do it2 = 1, order
@@ -271,7 +292,7 @@ Contains
     End If
 
     ! xz
-    If( Abs( deriv_weights( XZ ) ) > orthog_tol ) Then
+    If( need_XZ ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
@@ -290,7 +311,7 @@ Contains
     End If
 
     ! yz
-    If( Abs( deriv_weights( YZ ) ) > orthog_tol ) Then
+    If( need_YZ ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
@@ -352,7 +373,9 @@ Contains
           Do i_block_1 = start(1), final(1), FD%nc_block_jacobi( 1 )
              Call jacobi_sweep_block( [ i_block_1, i_block_2, i_block_3 ], &
                   grid_lb, lap_lb, FD%nc_block_apply, final, &
-                  order, FD%diag_inv, w1, w2, FD%deriv_weights, jac_weight, grid, &
+                  order, FD%diag_inv, w1, w2, FD%deriv_weights, &
+                  FD%need_XY, FD%need_XZ, FD%need_YZ, &
+                  jac_weight, grid, &
                   soln_in, soln_out, E_loc )
           End Do
        End Do
@@ -367,7 +390,8 @@ Contains
 
   End Subroutine jacobi_sweep
 
-  Pure Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, diag_inv, w1, w2, deriv_weights, jac_weight, grid, soln_in, &
+  Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, diag_inv, w1, w2, deriv_weights, &
+       need_XY, need_XZ, need_YZ, jac_weight, grid, soln_in, &
        soln_out, E )
 
     !!-----------------------------------------------------------
@@ -387,6 +411,9 @@ Contains
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w1            !! FD Weights for first derivs
     Real( wp ), Dimension( -order: ),                      Intent( In    ) :: w2            !! FD Weights for second derivs
     Real( wp ), Dimension( 1:6     ),                      Intent( In    ) :: deriv_weights !! See below
+    Logical                                              , Intent( In    ) :: need_XY       !! Need the XY deriv
+    Logical                                              , Intent( In    ) :: need_XZ       !! Need the XZ deriv
+    Logical                                              , Intent( In    ) :: need_YZ       !! Need the YZ deriv
     Real( wp )                                           , Intent( In    ) :: jac_weight    !! The weight of the NEW solution 
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( In    ) :: soln_in       !! The solution on input
@@ -397,8 +424,6 @@ Contains
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
     ! as we must finite difference along the directions of the grid. deriv_weights are the d_xx, d_xy
     ! etc. coefficients in this expression
-
-    Real( wp ), Parameter :: orthog_tol = 1.0e-14_wp
 
     Real( wp ) :: new_soln
     Real( wp ) :: st1, st2, st3
@@ -454,7 +479,7 @@ Contains
     End Do
 
     ! xy
-    If( Abs( deriv_weights( XY ) ) > orthog_tol ) Then
+    If( need_XY ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
              ! first derivs have zero weight at the diag point for central differences
@@ -473,7 +498,7 @@ Contains
     End If
 
     ! xz
-    If( Abs( deriv_weights( XZ ) ) > orthog_tol ) Then
+    If( need_XZ ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
@@ -492,7 +517,7 @@ Contains
     End If
 
     ! yz
-    If( Abs( deriv_weights( YZ ) ) > orthog_tol ) Then
+    If( need_YZ ) Then
        Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3 ) )
           Do it3 = 1, order
              Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
