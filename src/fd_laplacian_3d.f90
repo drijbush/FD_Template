@@ -29,10 +29,11 @@ Module FD_Laplacian_3d_module
      Logical                     , Private :: need_XZ     ! these compinents due to
      Logical                     , Private :: need_YZ     ! grid orthogonality
    Contains
-     Procedure, Public :: init
-     Procedure, Public :: reset_vecs
-     Procedure, Public :: apply
-     Procedure, Public :: jacobi_sweep
+     Procedure, Public :: init             ! With a bit of thought could probably
+     Procedure, Public :: reset_vecs       ! move these two into the lower level template
+
+     Procedure, Public :: apply            ! Should have deferred versions of
+     Procedure, Public :: jacobi_sweep     ! these two in the lower level template
   End type FD_Laplacian_3d
 
   Private
@@ -157,10 +158,10 @@ Contains
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
     Class( FD_Laplacian_3d )                                      , Intent( In    ) :: FD
-    Integer, Dimension(3)                                         , Intent( In    ) :: grid_lb !! lower bounds grid
-    Integer, Dimension(3)                                         , Intent( In    ) :: lap_lb  !! lower bounds laplacian
-    Integer, Dimension(3)                                         , Intent( In    ) :: start   !! start point for calculation
-    Integer, Dimension(3)                                         , Intent( In    ) :: final   !! final point for calculation
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: grid_lb !! lower bounds grid
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: lap_lb  !! lower bounds laplacian
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: start   !! start point for calculation
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: final   !! final point for calculation
     Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid    !! Thing to be differentiated
     Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: laplacian
 
@@ -339,10 +340,10 @@ Contains
     !! Written by I.J. Bush
     !!-----------------------------------------------------------
     Class( FD_Laplacian_3d )                                      , Intent( In    ) :: FD
-    Integer, Dimension(3)                                         , Intent( In    ) :: grid_lb    !! lower bounds grid
-    Integer, Dimension(3)                                         , Intent( In    ) :: lap_lb     !! lower bounds laplacian
-    Integer, Dimension(3)                                         , Intent( In    ) :: start      !! start point for calculation
-    Integer, Dimension(3)                                         , Intent( In    ) :: final      !! final point for calculation
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: grid_lb    !! lower bounds grid
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: lap_lb     !! lower bounds laplacian
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: start      !! start point for calculation
+    Integer, Dimension( 1:3 )                                     , Intent( In    ) :: final      !! final point for calculation
     Real( wp )                                                    , Intent( In    ) :: jac_weight !! The weight for the weighted jacobi
     Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid       !! Thing to be differentiated
     Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent( In    ) :: soln_in    !! Solution at start of sweep 
