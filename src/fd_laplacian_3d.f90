@@ -331,7 +331,7 @@ Contains
 
   End Subroutine apply_block
 
-  Subroutine jacobi_sweep( FD, grid_lb, lap_lb, start, final, jac_weight, grid, soln_in, soln_out, E )
+  Subroutine jacobi_sweep( FD, grid_lb, lap_lb, start, final, jac_weight, grid, soln_in, soln_out )
     !!-----------------------------------------------------------
     !! Use the finite difference approximation of the laplacian operator
     !! to perform a sweep of the (weighted) Jacobi method
@@ -347,13 +347,8 @@ Contains
     Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid       !! Thing to be differentiated
     Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent( In    ) :: soln_in    !! Solution at start of sweep 
     Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: soln_out   !! Solution at end of sweep
-    Real( wp )                                                    , Intent(   Out ) :: E          !! The "Energy"
 
     Real( wp ), Dimension( : ), Allocatable :: w1, w2
-
-    ! IMPORTANT: E_loc must have save to make sure it is a shared variable so OMP
-    ! can apply a reduction - thread safety has been carefully thought about here!
-    Real( wp ), Save :: E_loc
 
     Integer :: order
 
@@ -364,10 +359,7 @@ Contains
     w1 = FD%get_weight( 1 )
     w2 = FD%get_weight( 2 )
 
-    ! Use a temporary variable in case E is private in the calling routine
-    ! Doing it this way makes sure it always works
-    E_loc = 0.0_wp
-    !$omp do collapse( 3 ) reduction( +:E_loc )
+    !$omp do collapse( 3 )
     Do i_block_3 = start(3), final(3), FD%nc_block_jacobi( 3 )
        Do i_block_2 = start(2), final(2), FD%nc_block_jacobi( 2 )
           Do i_block_1 = start(1), final(1), FD%nc_block_jacobi( 1 )
@@ -376,23 +368,16 @@ Contains
                   order, FD%diag_inv, w1, w2, FD%deriv_weights, &
                   FD%need_XY, FD%need_XZ, FD%need_YZ, &
                   jac_weight, grid, &
-                  soln_in, soln_out, E_loc )
+                  soln_in, soln_out )
           End Do
        End Do
     End Do
     !$omp end do
-    ! E is likely to be shared, but doing it this way avoids potential races
-    ! as the implicit barrier at the end of single makes sure E is properly updated
-    ! before we continue
-    !$omp single
-    E = E_loc
-    !$omp end single
 
   End Subroutine jacobi_sweep
 
   Subroutine jacobi_sweep_block( s, lg, ll, nb, f, order, diag_inv, w1, w2, deriv_weights, &
-       need_XY, need_XZ, need_YZ, jac_weight, grid, soln_in, &
-       soln_out, E )
+       need_XY, need_XZ, need_YZ, jac_weight, grid, soln_in, soln_out )
 
     !!-----------------------------------------------------------
     !! Apply the FD laplacian operator to perform a Jacobi sweep on part of the grid
@@ -418,7 +403,6 @@ Contains
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( In    ) :: soln_in       !! The solution on input
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: soln_out      !! The updated solution
-    Real( wp )                                           , Intent( InOut ) :: E             !! The "Energy"
 
     ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
@@ -430,7 +414,6 @@ Contains
     Real( wp ) :: fac1, fac2, fac3
     Real( wp ) :: st12, st13, st23
     Real( wp ) :: fac12, fac13, fac23
-    Real( wp ) :: dE
 
     Integer :: i3, i2, i1
     Integer :: it, it1, it2, it3
@@ -535,18 +518,15 @@ Contains
        End Do
     End If
 
-    ! Scale by diag element inverse and weight as required, and calculate addition to energy
-    dE = 0.0_wp
+    ! Scale by diag element inverse and weight as required
     Do i3 = s( 3 ), Min( s( 3 ) + nb( 3 ) - 1, f( 3  ) )
        Do i2 = s( 2 ), Min( s( 2 ) + nb( 2 ) - 1, f( 2 ) )
           Do i1 = s( 1 ), Min( s( 1 ) + nb( 1 ) - 1, f( 1 ) )
              soln_out( i1, i2, i3 ) = soln_out( i1, i2, i3 ) * diag_inv
              soln_out( i1, i2, i3 ) = jac_weight * soln_out( i1, i2, i3 ) + ( 1.0_wp - jac_weight ) * soln_in( i1, i2, i3 )
-             dE = dE + soln_out( i1, i2, i3 ) * grid( i1, i2, i3 )
           End Do
        End Do
     End Do
-    E = E + 0.5_wp * dE
 
   End Subroutine jacobi_sweep_block
 
