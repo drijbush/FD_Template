@@ -6,11 +6,10 @@ Module FD_template_module
   !! Written by I.J. Bush
   !!-----------------------------------------------------------
 
+  Use numbers_module     , Only : wp
   Use grid_vectors_module, Only : grid_vectors
 
   Implicit None
-
-  Integer, Parameter, Public :: wp = Selected_real_kind( 15, 300 )
 
   Private
 
@@ -28,11 +27,11 @@ Module FD_template_module
      Integer                                   , Private :: order
      Real( wp ), Dimension( :, : ), Allocatable, Private :: weights
    Contains
-     Procedure                    , Public :: FD_init
-     Procedure                    , Public :: set_order
-     Procedure                    , Public :: get_order
-     Procedure                    , Public :: get_max_deriv
-     Procedure                    , Public :: get_weight
+     Procedure                    , Public           :: FD_init
+     Procedure                    , Public           :: set_order
+     Procedure                    , Public           :: get_order
+     Procedure                    , Public           :: get_max_deriv
+     Procedure                    , Public           :: get_weight
      Procedure(  apply_interface ), Public, Deferred :: apply
      Procedure( jacobi_interface ), Public, Deferred :: jacobi_sweep
   End type FD_template
