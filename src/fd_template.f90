@@ -15,26 +15,57 @@ Module FD_template_module
   Private
 
   Type, Abstract, Extends( grid_vectors ), Public :: FD_template
-    !!-----------------------------------------------------------
-    !! Low-level type for handling weights for arbitray stencils
-    !! and derivatives, contains grid_vector information through
-    !! the extension of the grid_vectors type.
-    !!
-    !! Do not use this type directly.
-    !!
-    !! Written by I.J. Bush
-    !!-----------------------------------------------------------
-    Integer                                   , Private :: max_deriv
-    Integer                                   , Private :: order
-    Real( wp ), Dimension( :, : ), Allocatable, Private :: weights
-  Contains
-    Procedure, Public :: FD_init
-    Procedure, Public :: set_order
-    Procedure, Public :: get_order
-    Procedure, Public :: get_max_deriv
-    Procedure, Public :: get_weight
-    ! When get time should have deferred apply, jacobi_sweep methods in here
+     !!-----------------------------------------------------------
+     !! Low-level type for handling weights for arbitray stencils
+     !! and derivatives, contains grid_vector information through
+     !! the extension of the grid_vectors type.
+     !!
+     !! Do not use this type directly.
+     !!
+     !! Written by I.J. Bush
+     !!-----------------------------------------------------------
+     Integer                                   , Private :: max_deriv
+     Integer                                   , Private :: order
+     Real( wp ), Dimension( :, : ), Allocatable, Private :: weights
+   Contains
+     Procedure                    , Public :: FD_init
+     Procedure                    , Public :: set_order
+     Procedure                    , Public :: get_order
+     Procedure                    , Public :: get_max_deriv
+     Procedure                    , Public :: get_weight
+     Procedure(  apply_interface ), Public, Deferred :: apply
+     Procedure( jacobi_interface ), Public, Deferred :: jacobi_sweep
   End type FD_template
+
+  Interface
+
+     Subroutine apply_interface( FD, grid_lb, lap_lb, start, final, grid, laplacian )
+       Import :: wp, FD_template
+       Implicit None
+       Class( FD_template )                                          , Intent( In    ) :: FD
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: grid_lb !! lower bounds grid
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: lap_lb  !! lower bounds laplacian
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: start   !! start point for calculation
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: final   !! final point for calculation
+       Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid    !! Thing to be differentiated
+       Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: laplacian
+     End Subroutine apply_interface
+
+     Subroutine jacobi_interface( FD, grid_lb, lap_lb, start, final, jac_weight, grid, soln_in, soln_out )
+       Import :: wp, FD_template
+       Class( FD_template )                                        , Intent( In    ) :: FD
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: grid_lb    !! lower bounds grid
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: lap_lb     !! lower bounds laplacian
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: start      !! start point for calculation
+       Integer, Dimension( 1:3 )                                     , Intent( In    ) :: final      !! final point for calculation
+       Real( wp )                                                    , Intent( In    ) :: jac_weight !! The weight for the weighted jacobi
+       Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid       !! Thing to be differentiated
+       Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent( In    ) :: soln_in    !! Solution at start of sweep 
+       Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: soln_out   !! Solution at end of sweep
+
+     End Subroutine jacobi_interface
+
+  End Interface
 
 Contains
 
@@ -72,7 +103,7 @@ Contains
     FD%order     = order
 
     Call weights( 0.0_wp, [ ( Real( i, wp ), i = -FD%order, FD%order ) ], &
-      FD%max_deriv, FD%weights )
+         FD%max_deriv, FD%weights )
 
   End Subroutine set_order
 
@@ -160,33 +191,33 @@ Contains
 
     Do i=1,n
 
-      mn = Min(i,deriv)
-      c2 = 1.0_wp
-      c5 = c4
-      c4 = sample_points(i) - centre
+       mn = Min(i,deriv)
+       c2 = 1.0_wp
+       c5 = c4
+       c4 = sample_points(i) - centre
 
-      Do j=0,i-1
+       Do j=0,i-1
 
-        c3 = sample_points(i)-sample_points(j)
-        c2 = c2*c3
+          c3 = sample_points(i)-sample_points(j)
+          c2 = c2*c3
 
-        If (j.Eq.i-1) Then ! If final iteration
+          If (j.Eq.i-1) Then ! If final iteration
+
+             Do k=mn,1,-1
+                coeffs(i,k) = c1*(k*coeffs(i-1,k-1)-c5*coeffs(i-1,k))/c2
+             End Do
+
+             coeffs(i,0) = -c1*c5*coeffs(i-1,0)/c2
+          Endif
 
           Do k=mn,1,-1
-            coeffs(i,k) = c1*(k*coeffs(i-1,k-1)-c5*coeffs(i-1,k))/c2
+             coeffs(j,k) = (c4*coeffs(j,k)-k*coeffs(j,k-1))/c3
           End Do
 
-          coeffs(i,0) = -c1*c5*coeffs(i-1,0)/c2
-        Endif
+          coeffs(j,0) = c4*coeffs(j,0)/c3
+       End Do
 
-        Do k=mn,1,-1
-          coeffs(j,k) = (c4*coeffs(j,k)-k*coeffs(j,k-1))/c3
-        End Do
-
-        coeffs(j,0) = c4*coeffs(j,0)/c3
-      End Do
-
-      c1 = c2
+       c1 = c2
     End Do
 
   End Subroutine weights
