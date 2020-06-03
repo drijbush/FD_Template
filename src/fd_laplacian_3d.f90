@@ -140,9 +140,13 @@ Contains
        End Do
     End Do
 
+    ! Set the inverse of the diagonal elemnt of the matrix
+    ! Note that as we are using a central differencing scheme all first derivative terms (due to a non-orthognal grid)
+    ! have zero weight on the dgiagonal of the matrix.
+    Allocate( w2( -FD%get_order():FD%get_order() ) )
     w2 = FD%get_weight( 2 )
-    ! Note allocation on assignment means indexing starts at 1
-    FD%diag_inv = 1.0_wp / ( w2( 1 ) * ( FD%deriv_weights( XX ) + FD%deriv_weights( YY ) + FD%deriv_weights( ZZ ) ) )
+    FD%diag_inv = 1.0_wp / ( w2( 0 ) * ( FD%deriv_weights( XX ) + FD%deriv_weights( YY ) + FD%deriv_weights( ZZ ) ) )
+
     ! Work out if we need the off diagonal derivatives
     FD%need_XY = Abs( FD%deriv_weights( XY ) ) > FD%orthog_tol
     FD%need_XZ = Abs( FD%deriv_weights( XZ ) ) > FD%orthog_tol
