@@ -351,7 +351,7 @@ Contains
     Real( wp )                                                    , Intent( In    ) :: jac_weight !! The weight for the weighted jacobi
     Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent( In    ) :: grid       !! The RHS
     Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent( In    ) :: soln_in    !! Solution at start of sweep 
-    Real( wp ), Dimension(  lap_lb(1):,  lap_lb(2):,  lap_lb(3): ), Intent(   Out ) :: soln_out   !! Solution at end of sweep
+    Real( wp ), Dimension( grid_lb(1):, grid_lb(2):, grid_lb(3): ), Intent(   Out ) :: soln_out   !! Solution at end of sweep
 
     Real( wp ), Dimension( : ), Allocatable :: w1, w2
 
@@ -407,7 +407,7 @@ Contains
     Real( wp )                                           , Intent( In    ) :: jac_weight    !! The weight of the NEW solution 
     Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( In    ) :: grid          !! The source
     Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( In    ) :: soln_in       !! The solution on input
-    Real( wp ), Dimension( ll( 1 ):, ll( 2 ):, ll( 3 ): ), Intent( InOut ) :: soln_out      !! The updated solution
+    Real( wp ), Dimension( lg( 1 ):, lg( 2 ):, lg( 3 ): ), Intent( InOut ) :: soln_out      !! The updated solution
 
     ! Deriv_weights: As we do NOT assume the grid is orthogonal our FD laplacian is of the form
     ! d_xx * del_xx + d_xy * del_xy + d_xz * del_xz + d_yy * del_yy + d_yz * del_yz + d_zz * del_zz
